@@ -2,676 +2,248 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="description" content="A browser aerodynamics lab: wing and icing simulation, an aircraft designer, and a 3D wind tunnel running on WebGPU.">
-<style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style>
-<title>Slipstream Lab</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Slipstream: an aircraft design and aerodynamics workstation in the browser: vortex-lattice analysis, 2D lattice Boltzmann with icing, flight dynamics and WebGPU 3D flow.">
+<title>Slipstream</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..800&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: an app bar with three view tabs; each view is a control rail on the left and a dark test-section stage on the right with HUD read-outs floating over it, charts beneath. */
+/* Layout: engineering workstation. Top bar, left module list + property inspector, full-height viewport, right results dock, status bar. Single dark theme by design. */
 :root {
-  --bg: #eef2f6;
-  --surface: #ffffff;
-  --surface-2: #e6ecf2;
-  --ink: #0f2238;
-  --muted: #56687b;
-  --line: #d3dce5;
-  --accent: #0b7ca8;
-  --accent-ink: #ffffff;
-  --accent-soft: #d9eff8;
-  --warm: #b8620c;
-  --crit: #c23a3a;
-  --good: #1f7a4a;
-  --ice: #8fd8f5;
-  --stage: #08131d;
-  --stage-ink: #dbe8f1;
-  --stage-glass: rgba(6, 16, 26, 0.72);
-  --f-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
-  --f-body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #0a1118; --surface: #111b25; --surface-2: #172431; --ink: #e1eaf2; --muted: #8b9eb0; --line: #213140;
-    --accent: #4fc4ec; --accent-ink: #03131b; --accent-soft: #0f2d3a; --warm: #efa24c; --crit: #f27c73; --good: #5ccf8f; --ice: #9fe0fa;
-    --stage: #050c13; --stage-ink: #dbe8f1; --stage-glass: rgba(4, 11, 18, 0.74);
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #0a1118; --surface: #111b25; --surface-2: #172431; --ink: #e1eaf2; --muted: #8b9eb0; --line: #213140;
-  --accent: #4fc4ec; --accent-ink: #03131b; --accent-soft: #0f2d3a; --warm: #efa24c; --crit: #f27c73; --good: #5ccf8f; --ice: #9fe0fa;
-  --stage: #050c13; --stage-ink: #dbe8f1; --stage-glass: rgba(4, 11, 18, 0.74);
+  --bg: #111316;
+  --chrome: #16191d;
+  --panel: #191c21;
+  --raise: #21252b;
+  --line: #2a2f36;
+  --line-soft: #22262c;
+  --text: #d5dae0;
+  --muted: #8a929b;
+  --faint: #5e666f;
+  --accent: #5b9cf2;
+  --accent-dim: #22324a;
+  --ok: #5bb07c;
+  --warn: #d6a24a;
+  --crit: #e0625c;
+  --vp: #0e1013;
+  --vp-grid: rgba(150, 165, 180, 0.07);
+  --grid: #24292f;
+  --grid-strong: #343a42;
+  --sans: "Geist", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; }
-[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
 body {
-  background: var(--bg); color: var(--ink); font: 15px/1.5 var(--f-body);
-  padding-left: max(16px, env(safe-area-inset-left, 0px));
-  padding-right: max(16px, env(safe-area-inset-right, 0px));
-  padding-block: 14px 40px;
+  background: var(--bg); color: var(--text); font: 12.5px/1.45 var(--sans);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 12px;
 }
-.app { max-width: 1440px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+[hidden] { display: none !important; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 
-/* ---------- app bar ---------- */
-.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; justify-content: space-between; }
-.brand { display: flex; flex-direction: column; }
-.brand b { font-family: var(--f-display); font-stretch: 85%; font-weight: 800; font-size: 26px; letter-spacing: -0.01em; line-height: 1.1; }
-.brand span { color: var(--muted); font-size: 13px; }
-.tabs { display: flex; gap: 6px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 5px; }
-.tabs a {
-  display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: center;
-  text-decoration: none; color: var(--ink); padding: 7px 14px 7px 10px; border-radius: 8px; min-width: 0;
+#app {
+  height: 100%; display: grid; border: 1px solid var(--line); background: var(--panel);
+  grid-template-columns: 292px minmax(0, 1fr) 328px; grid-template-rows: 38px minmax(0, 1fr) 24px;
+  grid-template-areas: "top top top" "left center right" "status status status";
 }
-.tabs a .ix { grid-row: span 2; font-family: var(--f-mono); font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 3px 5px; }
-.tabs a .t { font-family: var(--f-display); font-stretch: 90%; font-weight: 700; font-size: 15px; line-height: 1.15; }
-.tabs a small { color: var(--muted); font-size: 12px; line-height: 1.2; }
-.tabs a:hover { background: var(--surface-2); }
-.tabs a[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
-.tabs a[aria-selected="true"] small, .tabs a[aria-selected="true"] .ix { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent-ink) 40%, transparent); }
-@media (max-width: 720px) { .tabs { width: 100%; } .tabs a { flex: 1 1 100%; } }
+/* top bar */
+.top { grid-area: top; display: flex; align-items: center; gap: 14px; padding: 0 12px; background: var(--chrome); border-bottom: 1px solid var(--line); min-width: 0; }
+.brand { font-weight: 600; letter-spacing: .01em; white-space: nowrap; }
+.brand span { color: var(--faint); font-weight: 400; margin-left: 6px; }
+.top .sep { width: 1px; height: 18px; background: var(--line); flex: none; }
+.top select { background: var(--raise); border: 1px solid var(--line); border-radius: 3px; padding: 3px 6px; max-width: 220px; }
+.crumb { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crumb b { color: var(--text); font-weight: 500; }
+.top .spacer { flex: 1; }
+.cond { font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cond b { color: var(--text); font-weight: 400; }
 
-/* ---------- view layout ---------- */
-.view { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 16px; align-items: start; }
-@media (max-width: 1000px) { .view { grid-template-columns: minmax(0, 1fr); } .rail { order: 2; } }
-.rail { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+/* left dock */
+.left { grid-area: left; border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
+.mods { list-style: none; margin: 0; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.mods a { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 6px; padding: 5px 12px; color: var(--muted); text-decoration: none; border-left: 2px solid transparent; }
+.mods a:hover { background: var(--raise); color: var(--text); }
+.mods a[aria-current="page"] { color: var(--text); background: var(--raise); border-left-color: var(--accent); }
+.mods .code { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+.mods .meth { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+.dock-h { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); padding: 8px 12px 4px; display: flex; justify-content: space-between; }
+.scroll { overflow: auto; min-height: 0; flex: 1; }
 
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.card > header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.card h2 { margin: 0; font-family: var(--f-display); font-stretch: 90%; font-weight: 700; font-size: 16px; text-wrap: balance; }
-.card h2 + p, .card .lede { margin: 0; color: var(--muted); font-size: 13px; }
-.card .hdr-note { font-family: var(--f-mono); font-size: 11px; color: var(--muted); }
+/* inspector */
+details.sec { border-bottom: 1px solid var(--line-soft); }
+details.sec > summary { list-style: none; cursor: pointer; padding: 7px 12px; font-weight: 500; display: flex; align-items: center; gap: 6px; user-select: none; }
+details.sec > summary::-webkit-details-marker { display: none; }
+details.sec > summary::before { content: ""; width: 0; height: 0; border-left: 4px solid var(--faint); border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+details.sec[open] > summary::before { transform: rotate(90deg); }
+.sec-body { padding: 2px 12px 10px; display: flex; flex-direction: column; gap: 5px; }
+.field { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 24px; }
+.field > label { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.field.num { grid-template-columns: 104px minmax(0, 1fr) 56px 30px; }
+.field .unit { color: var(--faint); font-family: var(--mono); font-size: 10.5px; }
+.field .val { width: 56px; background: var(--raise); border: 1px solid var(--line); border-radius: 2px; padding: 2px 5px; font-family: var(--mono); font-size: 11.5px; text-align: right; }
+.field .val:focus { border-color: var(--accent); outline: none; }
+.field select { background: var(--raise); border: 1px solid var(--line); border-radius: 2px; padding: 3px 5px; min-width: 0; width: 100%; }
+.field .ro { font-family: var(--mono); font-size: 11.5px; text-align: right; }
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; background: transparent; height: 18px; margin: 0; }
+input[type=range]::-webkit-slider-runnable-track { height: 2px; background: var(--line); }
+input[type=range]::-moz-range-track { height: 2px; background: var(--line); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; margin-top: -4px; background: var(--text); border-radius: 1px; border: 0; }
+input[type=range]::-moz-range-thumb { width: 10px; height: 10px; background: var(--text); border-radius: 1px; border: 0; }
+input[type=range]:focus-visible { outline: none; }
+input[type=range]:focus-visible::-webkit-slider-thumb { background: var(--accent); }
+input.tog { -webkit-appearance: none; appearance: none; width: 26px; height: 14px; background: var(--line); border-radius: 7px; position: relative; cursor: pointer; justify-self: start; margin: 0; }
+input.tog::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+input.tog:checked { background: var(--accent-dim); }
+input.tog:checked::after { left: 14px; background: var(--accent); }
+.segm { display: flex; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; min-width: 0; }
+.segm button { flex: 1 1 0; min-width: 0; background: transparent; border: 0; border-right: 1px solid var(--line); padding: 3px 4px; color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.segm button:last-child { border-right: 0; }
+.segm button[aria-pressed="true"] { background: var(--accent-dim); color: var(--text); }
+.row-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.btn { background: var(--raise); border: 1px solid var(--line); border-radius: 3px; padding: 4px 10px; cursor: pointer; }
+.btn:hover { border-color: var(--faint); }
+.btn.primary { background: var(--accent-dim); border-color: #33507a; }
+.note { margin: 2px 0; color: var(--muted); font-size: 11.5px; }
+.note b { color: var(--text); font-weight: 500; }
 
-.try { display: flex; flex-wrap: wrap; gap: 6px; }
-.try button { font: 700 13px/1.2 var(--f-body); color: var(--ink); background: var(--surface-2); border: 1px solid transparent; border-radius: 999px; padding: 6px 12px; cursor: pointer; }
-.try button:hover { border-color: var(--accent); }
+/* centre viewport */
+.center { grid-area: center; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--vp); }
+.vp-bar { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-bottom: 1px solid var(--line); background: var(--chrome); flex-wrap: wrap; min-height: 33px; }
+.vp-bar .segm { flex: none; }
+.vp-bar .segm button { padding: 2px 9px; flex: none; overflow: visible; }
+.vp-bar .lab { color: var(--faint); font-size: 11px; }
+.vp-bar .grow { flex: 1; }
+.vp-bar .chk { display: flex; gap: 5px; align-items: center; color: var(--muted); }
+.vp { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.vp canvas.layer { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.vp-hud { position: absolute; top: 8px; left: 8px; font-family: var(--mono); font-size: 11px; color: var(--muted); background: rgba(14, 16, 19, .78); border: 1px solid var(--line-soft); padding: 4px 7px; pointer-events: none; line-height: 1.5; }
+.vp-hud b { color: var(--text); font-weight: 400; }
+#vp-legend { position: absolute; left: 8px; bottom: 8px; display: grid; grid-template-columns: auto auto auto; gap: 2px 6px; align-items: center; font-family: var(--mono); font-size: 10.5px; color: var(--muted); background: rgba(14, 16, 19, .78); border: 1px solid var(--line-soft); padding: 5px 7px; pointer-events: none; }
+#vp-legend .t { grid-column: 1 / -1; color: var(--text); }
+#vp-cbar { width: 150px; height: 8px; }
+#vp-toast { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); background: var(--chrome); border: 1px solid var(--line); padding: 10px 14px; max-width: min(440px, 86%); color: var(--text); text-align: center; }
+.vp-empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: var(--muted); padding: 24px; }
+.vp-empty div { max-width: 460px; }
+.vp-empty b { display: block; color: var(--text); font-weight: 500; margin-bottom: 6px; font-size: 14px; }
 
-.seg { display: flex; flex-wrap: wrap; gap: 4px; background: var(--surface-2); padding: 3px; border-radius: 9px; }
-.seg button { flex: 1 1 auto; font: 700 13px/1.2 var(--f-body); color: var(--ink); background: transparent; border: 0; padding: 7px 10px; border-radius: 7px; cursor: pointer; }
-.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(10, 30, 50, .18), inset 0 0 0 1.5px var(--accent); }
-.seg button:disabled { opacity: .45; cursor: not-allowed; }
+/* right dock */
+.right { grid-area: right; border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
+.res { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+.res h4 { margin: 8px 0 0; font-size: 10.5px; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); display: flex; justify-content: space-between; gap: 8px; }
+.res h4 span { text-transform: none; letter-spacing: 0; font-family: var(--mono); }
+dl.kv { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; margin: 0; }
+dl.kv dt { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+dl.kv dd { margin: 0; font-family: var(--mono); font-size: 11.5px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+dl.kv dd.big { font-size: 15px; color: var(--text); }
+dl.kv .kv-gap { grid-column: 1 / -1; height: 1px; background: var(--line-soft); margin: 3px 0; }
+dd.ok, .ok { color: var(--ok); } dd.warn, .warn { color: var(--warn); } dd.crit, .crit { color: var(--crit); }
+.badges { display: flex; flex-wrap: wrap; gap: 4px; }
+.badge { font-size: 11px; padding: 1px 6px; border: 1px solid currentColor; border-radius: 2px; white-space: nowrap; }
+.badge.neutral { color: var(--muted); }
+.plot { width: 100%; height: 150px; display: block; }
+.leg { display: flex; flex-wrap: wrap; gap: 2px 10px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.leg i { display: inline-block; width: 12px; height: 2px; vertical-align: middle; margin-right: 4px; }
+.leg i.dash { background: repeating-linear-gradient(90deg, currentColor 0 3px, transparent 3px 6px) !important; height: 1.5px; }
+.log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; }
+.log li { display: grid; grid-template-columns: 44px 1fr; gap: 6px; }
+.log time { font-family: var(--mono); color: var(--faint); }
+.ref { color: var(--muted); font-size: 11.5px; margin: 0; }
+.ref b { color: var(--text); font-weight: 500; }
 
-.ctl { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: baseline; }
-.ctl label { font-weight: 700; font-size: 14px; }
-.ctl label em { font-style: normal; font-weight: 400; color: var(--muted); font-size: 12px; }
-.ctl output { font-family: var(--f-mono); font-size: 13px; font-variant-numeric: tabular-nums; }
-.ctl input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 4px 0 0; height: 22px; }
-.ctl .ends { grid-column: 1 / -1; display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
-details.more { border-top: 1px dashed var(--line); padding-top: 8px; }
-details.more summary { cursor: pointer; font-weight: 700; font-size: 13px; color: var(--accent); }
-details.more[open] summary { margin-bottom: 10px; }
-details.more > div { display: flex; flex-direction: column; gap: 12px; }
+/* status bar */
+.status { grid-area: status; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 10px; background: var(--chrome); border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11px; color: var(--muted); min-width: 0; }
+.status span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.btn { font: 700 13px/1.2 var(--f-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); padding: 8px 12px; border-radius: 8px; cursor: pointer; }
-.btn:hover { border-color: var(--accent); }
-.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-.btn.ice { background: var(--accent-soft); border-color: var(--accent); }
-.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-select { font: 700 13px var(--f-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; max-width: 100%; }
-button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-.switch { display: flex; align-items: center; gap: 10px; cursor: pointer; font-weight: 700; }
-.switch input { appearance: none; width: 40px; height: 23px; border-radius: 999px; background: var(--line); position: relative; cursor: pointer; flex: none; transition: background .15s; }
-.switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 17px; height: 17px; border-radius: 50%; background: var(--surface); transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
-.switch input:checked { background: var(--accent); }
-.switch input:checked::after { transform: translateX(17px); }
-.switch small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
-
-.kind { border-radius: 8px; background: var(--surface-2); padding: 8px 10px; font-size: 13px; }
-.kind b { font-family: var(--f-display); font-stretch: 90%; font-size: 14px; }
-.kind p { margin: 2px 0 0; color: var(--muted); }
-
-/* ---------- stage ---------- */
-.stage { position: relative; background: var(--stage); border-radius: 12px; overflow: hidden; line-height: 0; color: var(--stage-ink); }
-.stage canvas.view { width: 100%; display: block; }
-.stage.drawable canvas.view { touch-action: none; }
-.hud { position: absolute; line-height: 1.3; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: none; max-width: calc(100% - 20px); }
-.hud.tl { top: 10px; left: 10px; } .hud.tr { top: 10px; right: 10px; justify-content: flex-end; } .hud.bl { bottom: 10px; left: 10px; } .hud.br { bottom: 10px; right: 10px; justify-content: flex-end; }
-.pill { background: var(--stage-glass); border-radius: 8px; padding: 6px 10px; backdrop-filter: blur(4px); }
-.pill .k { font: 700 10px/1.2 var(--f-display); letter-spacing: .08em; text-transform: uppercase; color: #93abbd; }
-.pill .v { font: 500 18px/1.2 var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.pill .v small { font-size: 11px; color: #93abbd; }
-.pill.sm .v { font-size: 13px; }
-.pill.ice { box-shadow: inset 0 0 0 1px rgba(143, 216, 245, .55); }
-.pill.crit { background: rgba(170, 30, 30, .85); }
-.note-tag { font: 12px/1.3 var(--f-mono); background: var(--stage-glass); border-radius: 6px; padding: 5px 8px; }
-.toast { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(4, 11, 18, .92); color: var(--stage-ink); font: 14px/1.45 var(--f-body); padding: 14px 18px; border-radius: 10px; max-width: min(460px, 86%); text-align: center; }
-.banner { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); font: 800 15px/1.2 var(--f-display); letter-spacing: .12em; text-transform: uppercase; padding: 8px 16px; border-radius: 8px; pointer-events: none; }
-.banner.crit { background: var(--crit); color: #fff; }
-.banner.warn { background: #e0a040; color: #1d1200; }
-.camctl { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; line-height: 1.2; }
-.camctl button { font: 700 12px var(--f-body); background: var(--stage-glass); color: var(--stage-ink); border: 1px solid rgba(255,255,255,.16); border-radius: 6px; padding: 5px 9px; cursor: pointer; }
-.camctl button:hover { border-color: var(--ice); }
-.nogpu { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; line-height: 1.5; text-align: center; }
-.nogpu div { max-width: 520px; }
-.nogpu b { display: block; font: 800 20px/1.2 var(--f-display); margin-bottom: 8px; }
-
-.legend { display: flex; align-items: center; gap: 10px; font: 12px var(--f-mono); color: var(--muted); flex-wrap: wrap; }
-.legend canvas { height: 10px; width: 200px; max-width: 45vw; border-radius: 2px; }
-.legend b { font: 700 12px var(--f-display); color: var(--ink); letter-spacing: .06em; text-transform: uppercase; }
-
-.status { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
-.chip { font: 700 12px/1.2 var(--f-display); letter-spacing: .04em; padding: 4px 10px; border-radius: 999px; border: 1.5px solid currentColor; white-space: nowrap; }
-.chip.neutral { color: var(--muted); } .chip.good { color: var(--good); } .chip.warn { color: var(--warm); } .chip.crit { color: var(--crit); } .chip.ice { color: var(--accent); }
-.theory { color: var(--muted); font-size: 13px; }
-.theory b { color: var(--ink); font-family: var(--f-mono); font-weight: 500; }
-
-.charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.charts.one { grid-template-columns: minmax(0, 1fr); }
-@media (max-width: 760px) { .charts { grid-template-columns: minmax(0, 1fr); } }
-.chartcard { padding: 12px 14px; gap: 6px; }
-.chartcard h3 { margin: 0; font: 700 13px var(--f-display); letter-spacing: .06em; text-transform: uppercase; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
-.key { font: 400 11px var(--f-mono); color: var(--muted); text-transform: none; letter-spacing: 0; display: inline-flex; gap: 5px; align-items: center; }
-.sw { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
-.sw.dash { background: repeating-linear-gradient(90deg, var(--muted) 0 4px, transparent 4px 7px) !important; }
-.chartcard canvas { width: 100%; height: 190px; display: block; }
-
-.log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
-.dtable { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0 20px; margin: 0; }
-.dtable div { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line); padding: 6px 0; font-size: 13.5px; min-width: 0; }
-.dtable dt { color: var(--muted); }
-.dtable dd { margin: 0; font-family: var(--f-mono); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
-.log li { display: grid; grid-template-columns: 62px 1fr; gap: 8px; }
-.log time { font-family: var(--f-mono); color: var(--muted); font-size: 12px; }
-.log li.crit span { color: var(--crit); font-weight: 700; } .log li.warn span { color: var(--warm); } .log li.good span { color: var(--good); }
-.log .empty { color: var(--muted); grid-template-columns: 1fr; }
-
-.explain { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 4px; }
-@media (max-width: 900px) { .explain { grid-template-columns: minmax(0, 1fr); } }
-.explain section { min-width: 0; }
-.explain h3 { margin: 0 0 4px; font: 700 15px var(--f-display); font-stretch: 90%; text-wrap: balance; }
-.explain p, .explain li { margin: 0 0 6px; color: var(--muted); font-size: 13.5px; max-width: 65ch; }
-.explain ul { margin: 0; padding-left: 18px; }
-@media (prefers-reduced-motion: reduce) { .switch input, .switch input::after { transition: none; } }
+/* narrower screens: results dock moves under the viewport, page scrolls */
+@media (max-width: 1180px) {
+  html, body { height: auto; }
+  #app { height: auto; grid-template-columns: 280px minmax(0, 1fr); grid-template-rows: 38px 64vh auto 24px;
+    grid-template-areas: "top top" "left center" "left right" "status status"; }
+  .right { border-top: 1px solid var(--line); }
+  .left .scroll { max-height: none; }
+}
+@media (max-width: 760px) {
+  #app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 58vh auto auto 24px; grid-template-areas: "top" "center" "left" "right" "status"; }
+  .top { flex-wrap: wrap; padding: 6px 10px; gap: 8px; }
+  .cond { flex-basis: 100%; }
+  .left { border-right: 0; border-top: 1px solid var(--line); }
+  .mods { display: flex; overflow-x: auto; }
+  .mods a { grid-template-columns: auto; border-left: 0; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .mods a[aria-current="page"] { border-bottom-color: var(--accent); }
+  .mods .code, .mods .meth { display: none; }
+  .field.num { grid-template-columns: 96px minmax(0, 1fr) 56px 28px; }
+}
 </style>
+
 </head>
 <body>
-<div class="app">
-  <header class="bar">
-    <div class="brand"><b>Slipstream Lab</b><span>Airflow, lift and icing, solved live in your browser</span></div>
-    <nav class="tabs" aria-label="Views">
-      <a href="#wing" aria-selected="true"><span class="ix">2D</span><span class="t">Wing section</span><small>Airflow and ice growth</small></a>
-      <a href="#designer" aria-selected="false"><span class="ix">DES</span><span class="t">Designer</span><small>Design your own wing</small></a>
-      <a href="#aircraft" aria-selected="false"><span class="ix">FLT</span><span class="t">Aircraft in flight</span><small>Altitude, ice, stall</small></a>
-      <a href="#tunnel3d" aria-selected="false"><span class="ix">3D</span><span class="t">3D tunnel</span><small>GPU, wingtip vortices</small></a>
-    </nav>
+<div id="app">
+  <header class="top">
+    <div class="brand">Slipstream<span>aero lab</span></div>
+    <div class="sep"></div>
+    <select id="project" aria-label="Project">
+      <option value="trainer">Light trainer</option>
+      <option value="glider">Sailplane</option>
+      <option value="turboprop">Regional turboprop</option>
+      <option value="airliner">Airliner on approach</option>
+      <option value="swept">Swept wing, no twist</option>
+      <option value="forward">Forward-swept wing</option>
+    </select>
+    <div class="crumb" id="crumb"></div>
+    <div class="spacer"></div>
+    <div class="cond" id="cond"></div>
   </header>
 
-  <!-- ================= WING SECTION ================= -->
-  <section class="view" id="v-wing">
-    <div class="rail">
-      <div class="card">
-        <header><h2>Try a scenario</h2></header>
-        <div class="try" id="w-try">
-          <button data-p="cruise">Clean cruise</button>
-          <button data-p="stall">Stall</button>
-          <button data-p="rime">Rime ice</button>
-          <button data-p="glaze">Glaze ice horns</button>
-          <button data-p="sld">Large droplets</button>
-          <button data-p="street">Vortex street</button>
-        </div>
-      </div>
+  <aside class="left" aria-label="Modules and properties">
+    <nav aria-label="Modules">
+      <div class="dock-h">Modules</div>
+      <ul class="mods" id="mods">
+        <li><a href="#geometry"><span class="code">GEO</span>Geometry<span class="meth">edit</span></a></li>
+        <li><a href="#airfoil"><span class="code">2D</span>Airfoil<span class="meth">LBM</span></a></li>
+        <li><a href="#wing"><span class="code">VLM</span>Wing and tail<span class="meth">VLM</span></a></li>
+        <li><a href="#flight"><span class="code">FLT</span>Flight and icing<span class="meth">3-DOF</span></a></li>
+        <li><a href="#cfd3d"><span class="code">3D</span>3D flow<span class="meth">GPU</span></a></li>
+      </ul>
+    </nav>
+    <div class="dock-h"><span>Properties</span><span id="insp-note"></span></div>
+    <div class="scroll" id="inspector"></div>
+  </aside>
 
-      <div class="card">
-        <header><h2>1 · Wing shape</h2><span class="naca hdr-note" id="w-code">NACA 2412</span></header>
-        <div class="seg" id="w-shape">
-          <button data-v="airfoil" aria-pressed="true">Airfoil</button>
-          <button data-v="plate" aria-pressed="false">Flat plate</button>
-          <button data-v="cylinder" aria-pressed="false">Cylinder</button>
-        </div>
-        <div id="w-airfoil" style="display:flex;flex-direction:column;gap:12px">
-          <select id="w-preset" aria-label="Airfoil">
-            <option value="0006">NACA 0006 · thin, symmetric</option>
-            <option value="0012">NACA 0012 · classic symmetric</option>
-            <option value="0024">NACA 0024 · thick, symmetric</option>
-            <option value="2412" selected>NACA 2412 · light aircraft</option>
-            <option value="4412">NACA 4412 · high lift</option>
-            <option value="6409">NACA 6409 · heavy camber</option>
-          </select>
-          <details class="more"><summary>Fine-tune the shape</summary><div>
-            <div class="ctl"><label for="w-m">Camber <em>curve of the wing</em></label><output id="w-m-o"></output><input type="range" id="w-m" min="0" max="9" step="0.5" value="2"></div>
-            <div class="ctl"><label for="w-p">Peak camber <em>how far back</em></label><output id="w-p-o"></output><input type="range" id="w-p" min="1" max="9" step="1" value="4"></div>
-            <div class="ctl"><label for="w-t">Thickness</label><output id="w-t-o"></output><input type="range" id="w-t" min="4" max="30" step="1" value="12"></div>
-            <div class="ctl"><label for="w-flap">Flap <em>rear 25%</em></label><output id="w-flap-o"></output><input type="range" id="w-flap" min="-20" max="40" step="1" value="0"></div>
-          </div></details>
-        </div>
-      </div>
-
-      <div class="card">
-        <header><h2>2 · Airflow</h2></header>
-        <div class="ctl"><label for="w-aoa">Tilt <em>angle of attack</em></label><output id="w-aoa-o"></output><input type="range" id="w-aoa" min="-10" max="25" step="0.5" value="4">
-          <div class="ends"><span>nose down</span><span>nose up</span></div></div>
-        <div class="ctl"><label for="w-re">Reynolds number</label><output id="w-re-o"></output><input type="range" id="w-re" min="0" max="1000" step="1" value="500">
-          <div class="ends"><span>syrupy, laminar</span><span>thin, turbulent</span></div></div>
-      </div>
-
-      <div class="card">
-        <header><h2>3 · Icing cloud</h2><span class="hdr-note" id="w-icestate">off</span></header>
-        <label class="switch"><input type="checkbox" id="w-icing"><span>Fly into supercooled cloud<small>Droplets below 0 °C that freeze on contact</small></span></label>
-        <div class="ctl"><label for="w-temp">Air temperature</label><output id="w-temp-o"></output><input type="range" id="w-temp" min="-30" max="2" step="0.5" value="-12">
-          <div class="ends"><span>−30 °C</span><span>+2 °C</span></div></div>
-        <div class="ctl"><label for="w-lwc">Cloud water <em>liquid water content</em></label><output id="w-lwc-o"></output><input type="range" id="w-lwc" min="0.1" max="2" step="0.05" value="0.5"></div>
-        <div class="ctl"><label for="w-mvd">Droplet size</label><output id="w-mvd-o"></output><input type="range" id="w-mvd" min="10" max="200" step="1" value="20">
-          <div class="ends"><span>fine cloud</span><span>freezing drizzle</span></div></div>
-        <div class="ctl"><label for="w-vel">Airspeed</label><output id="w-vel-o"></output><input type="range" id="w-vel" min="50" max="200" step="5" value="120"></div>
-        <div class="kind" id="w-kind"></div>
-        <div class="row"><button class="btn ice" id="w-deice">Shed the ice</button></div>
-        <p class="lede">The wing chord is taken as 2 m. Ice grows about 100,000× faster than real time; the clock shows the real exposure it represents.</p>
-      </div>
-
-      <div class="card">
-        <header><h2>4 · Display</h2></header>
-        <div class="seg" id="w-viewseg">
-          <button data-v="speed" aria-pressed="true">Speed</button>
-          <button data-v="pressure" aria-pressed="false">Pressure</button>
-          <button data-v="vorticity" aria-pressed="false">Spin</button>
-          <button data-v="smoke" aria-pressed="false">Smoke</button>
-        </div>
-        <label class="switch"><input type="checkbox" id="w-parts" checked><span>Tracer particles</span></label>
-        <div class="row">
-          <select id="w-res" aria-label="Grid resolution">
-            <option value="coarse">Coarse grid · fast</option>
-            <option value="std" selected>Standard grid</option>
-            <option value="fine">Fine grid · slow</option>
-          </select>
-          <button class="btn primary" id="w-play">Pause</button>
-          <button class="btn" id="w-reset">Restart flow</button>
-        </div>
-      </div>
+  <main class="center">
+    <div class="vp-bar" id="vp-bar"></div>
+    <div class="vp" id="vp">
+      <canvas class="layer" id="cv-geometry" hidden></canvas>
+      <canvas class="layer" id="cv-wing" hidden></canvas>
+      <canvas class="layer" id="cv-airfoil" hidden></canvas>
+      <canvas class="layer" id="cv-flight" hidden></canvas>
+      <canvas class="layer" id="cv-cfd3d" hidden></canvas>
+      <div class="vp-empty" id="vp-empty" hidden><div><b id="vp-empty-t"></b><span id="vp-empty-m"></span></div></div>
+      <div class="vp-hud" id="vp-hud" hidden></div>
+      <div id="vp-legend" hidden><span class="t" id="vp-lt"></span><span id="vp-lmin"></span><canvas id="vp-cbar" width="150" height="8"></canvas><span id="vp-lmax"></span></div>
+      <div id="vp-toast" hidden></div>
     </div>
+  </main>
 
-    <div class="main">
-      <div class="stage" id="w-stage">
-        <canvas class="view" id="w-view" aria-label="Airflow around the wing section"></canvas>
-        <div class="hud tl">
-          <div class="pill"><div class="k">Lift C<sub>l</sub></div><div class="v" id="w-cl">…</div></div>
-          <div class="pill"><div class="k">Drag C<sub>d</sub></div><div class="v" id="w-cd">…</div></div>
-          <div class="pill"><div class="k">Lift ÷ drag</div><div class="v" id="w-ld">…</div></div>
-        </div>
-        <div class="hud tr"><div class="pill sm"><div class="k">Solver</div><div class="v" id="w-perf">—</div></div></div>
-        <div class="hud bl"><span class="note-tag" id="w-probe">Point at the flow to read it</span></div>
-        <div class="hud br" id="w-icehud" hidden>
-          <div class="pill sm ice"><div class="k">Ice thickness</div><div class="v" id="w-icek">—</div></div>
-          <div class="pill sm ice"><div class="k">Exposure</div><div class="v" id="w-iceexp">—</div></div>
-          <div class="pill sm ice"><div class="k">vs clean wing</div><div class="v" id="w-icedelta">—</div></div>
-        </div>
-        <div class="toast" id="w-toast" hidden></div>
-      </div>
-      <div class="legend"><b id="w-lname">Speed</b><span id="w-lmin">0</span><canvas id="w-bar" width="200" height="10"></canvas><span id="w-lmax">1.8×</span><span id="w-lnote"></span></div>
-      <div class="status">
-        <span class="chip neutral" id="w-chip">Starting up</span>
-        <span class="chip crit" id="w-stall" hidden>Stalled</span>
-        <span class="chip ice" id="w-icechip" hidden></span>
-        <span class="theory" id="w-theory"></span>
-      </div>
-      <div class="charts one">
-        <div class="card chartcard">
-          <h3>Force history
-            <span class="key"><span class="sw" style="background:var(--accent)"></span>lift C<sub>l</sub></span>
-            <span class="key"><span class="sw" style="background:var(--warm)"></span>drag C<sub>d</sub></span>
-            <span class="key" id="w-thkey"><span class="sw dash"></span>theory C<sub>l</sub></span>
-          </h3>
-          <canvas id="w-hist" style="height:160px"></canvas>
-        </div>
-      </div>
-      <div class="explain">
-        <section><h3>What's being solved</h3><p>A lattice Boltzmann solver, a standard CFD method that reproduces the Navier–Stokes equations, updates every grid cell many times a second. Walls are no-slip. Lift and drag are measured from the momentum the air gives the wing.</p></section>
-        <section><h3>How the ice grows</h3><p>Each droplet has mass and inertia, with standard sphere drag (Schiller–Naumann). Small droplets follow the air around the nose; big ones can't turn and strike further back. A freezing fraction decides how much freezes on impact. The rest runs back along the surface. Frozen cells become solid wall, so the airflow then has to go around the ice.</p></section>
-        <section><h3>Limits</h3><p>This is 2D, at Reynolds numbers far below a real wing's (about 10⁷). Ice is built from grid cells about 2 cm across. The heat balance is simplified to a temperature-based freezing fraction. Expect the right trends: rime versus glaze shapes, lost lift and extra drag. The exact numbers won't match.</p></section>
-      </div>
-    </div>
-  </section>
+  <aside class="right" aria-label="Results">
+    <div class="dock-h"><span>Results</span><span id="res-note"></span></div>
+    <div class="scroll"><div class="res" id="results"></div></div>
+  </aside>
 
-
-  <!-- ================= DESIGNER ================= -->
-  <section class="view" id="v-designer" hidden>
-    <div class="rail">
-      <div class="card">
-        <header><h2>Start from</h2></header>
-        <div class="try" id="d-try">
-          <button data-p="trainer">Light trainer</button>
-          <button data-p="glider">Sailplane</button>
-          <button data-p="airliner">Airliner on approach</button>
-          <button data-p="swept">Swept wing, no twist</button>
-          <button data-p="forward">Forward-swept</button>
-          <button data-p="winglets">Winglets</button>
-          <button data-p="unstable">CG too far aft</button>
-        </div>
-      </div>
-      <div class="card">
-        <header><h2>1 · Wing planform</h2></header>
-        <div class="ctl"><label for="d-b">Span</label><output id="d-b-o"></output><input type="range" id="d-b"></div>
-        <div class="ctl"><label for="d-cr">Root chord</label><output id="d-cr-o"></output><input type="range" id="d-cr"></div>
-        <div class="ctl"><label for="d-taper">Taper ratio <em>tip ÷ root chord</em></label><output id="d-taper-o"></output><input type="range" id="d-taper"></div>
-        <div class="ctl"><label for="d-sweep">Sweep <em>quarter-chord line</em></label><output id="d-sweep-o"></output><input type="range" id="d-sweep"></div>
-        <select id="d-sec" aria-label="Airfoil">
-          <option value="0009">NACA 0009 · thin symmetric</option><option value="0012">NACA 0012 · symmetric</option>
-          <option value="2412">NACA 2412 · light aircraft</option><option value="2415">NACA 2415 · thicker</option>
-          <option value="4412">NACA 4412 · high lift</option><option value="4415">NACA 4415 · sailplane-like</option><option value="6409">NACA 6409 · heavy camber</option>
-        </select>
-        <details class="more"><summary>Dihedral, twist and flaps</summary><div>
-          <div class="ctl"><label for="d-dihedral">Dihedral <em>tips up</em></label><output id="d-dihedral-o"></output><input type="range" id="d-dihedral"></div>
-          <div class="ctl"><label for="d-twist">Twist at tip <em>negative = washout</em></label><output id="d-twist-o"></output><input type="range" id="d-twist"></div>
-          <div class="ctl"><label for="d-inc">Wing incidence</label><output id="d-inc-o"></output><input type="range" id="d-inc"></div>
-          <div class="ctl"><label for="d-flapSpan">Flap span <em>from root</em></label><output id="d-flapSpan-o"></output><input type="range" id="d-flapSpan"></div>
-          <div class="ctl"><label for="d-flap">Flap angle</label><output id="d-flap-o"></output><input type="range" id="d-flap"></div>
-        </div></details>
-        <details class="more"><summary>Winglets</summary><div>
-          <div class="ctl"><label for="d-wlH">Winglet height</label><output id="d-wlH-o"></output><input type="range" id="d-wlH"></div>
-          <div class="ctl"><label for="d-wlCant">Winglet cant <em>90° = vertical</em></label><output id="d-wlCant-o"></output><input type="range" id="d-wlCant"></div>
-        </div></details>
-      </div>
-      <div class="card">
-        <header><h2>2 · Tail and balance</h2></header>
-        <label class="switch"><input type="checkbox" id="d-tail" checked><span>Horizontal tail<small>Needed for pitch stability on a normal layout</small></span></label>
-        <div class="d-tailonly" style="display:flex;flex-direction:column;gap:12px">
-          <div class="ctl"><label for="d-bt">Tail span</label><output id="d-bt-o"></output><input type="range" id="d-bt"></div>
-          <div class="ctl"><label for="d-ct">Tail root chord</label><output id="d-ct-o"></output><input type="range" id="d-ct"></div>
-          <div class="ctl"><label for="d-lt">Tail arm <em>wing root to tail leading edge</em></label><output id="d-lt-o"></output><input type="range" id="d-lt"></div>
-          <div class="ctl"><label for="d-it">Tail incidence</label><output id="d-it-o"></output><input type="range" id="d-it"></div>
-          <details class="more"><summary>Tail height</summary><div><div class="ctl"><label for="d-zt">Tail height <em>above the wing</em></label><output id="d-zt-o"></output><input type="range" id="d-zt"></div></div></details>
-        </div>
-        <div class="ctl"><label for="d-cg">Centre of gravity <em>% of mean chord</em></label><output id="d-cg-o"></output><input type="range" id="d-cg"></div>
-        <details class="more"><summary>Fuselage</summary><div><div class="ctl"><label for="d-lf">Fuselage length</label><output id="d-lf-o"></output><input type="range" id="d-lf"></div><div class="ctl"><label for="d-df">Fuselage diameter</label><output id="d-df-o"></output><input type="range" id="d-df"></div></div></details>
-        <div class="row"><button class="btn" id="d-trim">Trim with the tail</button></div>
-      </div>
-      <div class="card">
-        <header><h2>3 · Flight condition</h2></header>
-        <div class="ctl"><label for="d-mass">Mass</label><output id="d-mass-o"></output><input type="range" id="d-mass"></div>
-        <div class="ctl"><label for="d-h">Altitude</label><output id="d-h-o"></output><input type="range" id="d-h"></div>
-        <div class="ctl"><label for="d-V">Airspeed <em>true airspeed</em></label><output id="d-V-o"></output><input type="range" id="d-V"></div>
-        <div class="seg" id="d-engine">
-          <button data-v="prop" aria-pressed="true">Propeller</button>
-          <button data-v="jet" aria-pressed="false">Jet</button>
-          <button data-v="none" aria-pressed="false">Glider</button>
-        </div>
-        <div id="d-power-ctl"><div class="ctl"><label for="d-power">Engine power</label><output id="d-power-o"></output><input type="range" id="d-power"></div></div>
-        <div id="d-thrust-ctl" hidden><div class="ctl"><label for="d-thrust">Engine thrust <em>total, sea level</em></label><output id="d-thrust-o"></output><input type="range" id="d-thrust"></div></div>
-        <div class="row"><button class="btn primary" id="d-fly">Fly it in the Aircraft view</button></div>
-      </div>
-    </div>
-    <div class="main">
-      <div class="stage" id="d-stage">
-        <canvas class="view" id="d-view" aria-label="Your aircraft with its lift loading"></canvas>
-        <div class="hud tl">
-          <div class="pill"><div class="k">Lift C<sub>L</sub></div><div class="v" id="d-cl">…</div></div>
-          <div class="pill"><div class="k">Drag C<sub>D</sub></div><div class="v" id="d-cd">…</div></div>
-          <div class="pill"><div class="k">Lift ÷ drag</div><div class="v" id="d-ld">…</div></div>
-          <div class="pill"><div class="k">Span efficiency</div><div class="v" id="d-e">…</div></div>
-        </div>
-        <div class="hud tr"><div class="pill sm"><div class="k">Vortex lattice</div><div class="v" id="d-perf">—</div></div></div>
-        <div class="hud bl"><span class="note-tag">Drag to rotate · scroll to zoom</span></div>
-        <div class="camctl"><button data-cam="persp">3/4 view</button><button data-cam="top">Top</button><button data-cam="front">Front</button><button data-cam="side">Side</button></div>
-      </div>
-      <div class="legend">
-        <div class="seg" id="d-colour" style="padding:2px"><button data-v="load" aria-pressed="true">Lift loading</button><button data-v="stall" aria-pressed="false">Stall margin</button></div>
-        <b id="d-lname">Lift loading</b><span id="d-lmin">low</span><canvas id="d-bar" width="200" height="10"></canvas><span id="d-lmax">high</span>
-      </div>
-      <div class="status">
-        <span class="chip neutral" id="d-chip-fly">…</span>
-        <span class="chip neutral" id="d-chip-sm">…</span>
-        <span class="chip neutral" id="d-chip-stall">…</span>
-        <span class="theory" id="d-warn"></span>
-      </div>
-      <div class="charts">
-        <div class="card chartcard"><h3>Lift along the span <span class="key"><span class="sw" style="background:var(--accent)"></span>your wing</span><span class="key"><span class="sw dash"></span>ideal elliptic</span></h3><canvas id="d-c1"></canvas></div>
-        <div class="card chartcard"><h3>Where it stalls <span class="key"><span class="sw" style="background:var(--accent)"></span>now</span><span class="key"><span class="sw" style="background:var(--warm)"></span>at stall</span><span class="key"><span class="sw dash" style="background:repeating-linear-gradient(90deg,var(--crit) 0 4px,transparent 4px 7px)"></span>section limit</span></h3><canvas id="d-c2"></canvas></div>
-        <div class="card chartcard"><h3>Drag polar <span class="key"><span class="sw" style="background:var(--accent)"></span>total</span><span class="key"><span class="sw dash"></span>induced only</span><span class="key"><span class="sw" style="background:var(--good)"></span>best L/D</span></h3><canvas id="d-c3"></canvas></div>
-        <div class="card chartcard"><h3>Pitch stability <span class="key">C<sub>m</sub> about the CG: a downward slope is stable</span></h3><canvas id="d-c4"></canvas></div>
-      </div>
-      <div class="card">
-        <header><h2>Design summary</h2><span class="hdr-note">at the flight condition you set</span></header>
-        <dl class="dtable" id="d-table"></dl>
-      </div>
-      <div class="explain">
-        <section><h3>The method</h3><p>The vortex-lattice method is the workhorse of early aircraft design, used in tools such as AVL and XFLR5. The wing and tail are covered in horseshoe vortices. Their strengths are solved together so that no air passes through any panel. Lift and pitching moment come from Kutta–Joukowski. Induced drag comes from a Trefftz-plane analysis of the wake. Checked here against theory: a rectangular wing of aspect ratio 6 gives a lift slope of 4.29/rad and a span efficiency of 0.96.</p></section>
-        <section><h3>What's estimated</h3><p>Profile drag uses turbulent skin friction with a thickness form factor, plus the fuselage and fin, the standard textbook build-up. Stall uses the critical-section method: the wing stalls when its most heavily loaded section reaches that airfoil's maximum lift. Section maximum lift is a fit to published NACA data at high Reynolds number.</p></section>
-        <section><h3>Limits</h3><p>This is potential flow: no viscosity in the lift, no compressibility (stay below about Mach 0.5), and no vortex lift on sharp deltas. The fuselage adds drag but no lift or pitching moment, and the fin isn't modelled for sideslip. Treat absolute numbers as within about 10%; comparisons between designs are much more reliable.</p></section>
-      </div>
-    </div>
-  </section>
-  <!-- ================= AIRCRAFT ================= -->
-  <section class="view" id="v-aircraft" hidden>
-    <div class="rail">
-      <div class="card">
-        <header><h2>Try a scenario</h2></header>
-        <div class="try" id="p-try">
-          <button data-p="cruise">Jet cruise in cloud</button>
-          <button data-p="hold">Holding in icing</button>
-          <button data-p="light">Light aircraft, no de-ice</button>
-          <button data-p="sld">Freezing drizzle</button>
-        </div>
-      </div>
-      <div class="card">
-        <header><h2>1 · Aircraft</h2></header>
-        <div class="seg" id="p-ac">
-          <button data-v="light" aria-pressed="false">Light single</button>
-          <button data-v="turboprop" aria-pressed="true">Turboprop</button>
-          <button data-v="jet" aria-pressed="false">Jet</button>
-          <button data-v="design" aria-pressed="false" id="p-ac-design" hidden>Your design</button>
-        </div>
-        <p class="lede" id="p-acdesc"></p>
-      </div>
-      <div class="card">
-        <header><h2>2 · Autopilot</h2></header>
-        <div class="ctl"><label for="p-alt">Hold altitude</label><output id="p-alt-o"></output><input type="range" id="p-alt" min="0" max="13000" step="100" value="5500"></div>
-        <div class="ctl"><label for="p-spd">Hold airspeed <em>true airspeed</em></label><output id="p-spd-o"></output><input type="range" id="p-spd" min="70" max="160" step="1" value="140"></div>
-      </div>
-      <div class="card">
-        <header><h2>3 · Weather</h2><span class="hdr-note" id="p-oat"></span></header>
-        <label class="switch"><input type="checkbox" id="p-cloud"><span>Flying in cloud<small>Visible moisture is what makes icing possible</small></span></label>
-        <div class="ctl"><label for="p-lwc">Cloud water</label><output id="p-lwc-o"></output><input type="range" id="p-lwc" min="0.1" max="1.5" step="0.05" value="0.4"></div>
-        <div class="ctl"><label for="p-mvd">Droplet size</label><output id="p-mvd-o"></output><input type="range" id="p-mvd" min="10" max="200" step="1" value="20"></div>
-        <div class="kind" id="p-kind"></div>
-      </div>
-      <div class="card">
-        <header><h2>4 · Ice protection</h2></header>
-        <div class="row">
-          <button class="btn ice" id="p-boots">Inflate de-icing boots</button>
-          <button class="btn" id="p-fromwing">Use ice from Wing view</button>
-          <button class="btn" id="p-clear">Clear ice</button>
-        </div>
-        <div class="ctl"><label>Time speed</label><output id="p-ts-o"></output></div>
-        <div class="seg" id="p-ts">
-          <button data-v="1" aria-pressed="false">Real time</button>
-          <button data-v="10" aria-pressed="false">×10</button>
-          <button data-v="30" aria-pressed="true">×30</button>
-          <button data-v="60" aria-pressed="false">×60</button>
-        </div>
-        <div class="row"><button class="btn primary" id="p-play">Pause</button><button class="btn" id="p-restart">Restart flight</button></div>
-      </div>
-    </div>
-
-    <div class="main">
-      <div class="stage" id="p-stage">
-        <canvas class="view" id="p-view" aria-label="Aircraft in flight with force arrows"></canvas>
-        <div class="hud tl">
-          <div class="pill"><div class="k">Altitude</div><div class="v" id="p-h">—</div></div>
-          <div class="pill"><div class="k">Airspeed</div><div class="v" id="p-v">—</div></div>
-          <div class="pill"><div class="k">Climb</div><div class="v" id="p-vs">—</div></div>
-        </div>
-        <div class="hud tr">
-          <div class="pill sm"><div class="k">Outside air</div><div class="v" id="p-t">—</div></div>
-          <div class="pill sm"><div class="k">Reynolds</div><div class="v" id="p-re">—</div></div>
-        </div>
-        <div class="hud bl">
-          <div class="pill"><div class="k">Angle of attack</div><div class="v" id="p-a">—</div></div>
-          <div class="pill"><div class="k">Stall speed</div><div class="v" id="p-vstall">—</div></div>
-        </div>
-        <div class="hud br">
-          <div class="pill sm ice"><div class="k">Wing ice</div><div class="v" id="p-ice">—</div></div>
-          <div class="pill sm"><div class="k">Flight time</div><div class="v" id="p-clock">—</div></div>
-        </div>
-        <div class="banner crit" id="p-banner" hidden>Stall</div>
-        <div class="toast" id="p-toast" hidden></div>
-      </div>
-      <div class="status">
-        <span class="chip good" id="p-chip">Level flight</span>
-        <span class="chip ice" id="p-icechip" hidden></span>
-        <span class="theory" id="p-summary"></span>
-      </div>
-      <div class="charts">
-        <div class="card chartcard">
-          <h3>Lift curve
-            <span class="key"><span class="sw dash"></span>clean</span>
-            <span class="key"><span class="sw" style="background:var(--accent)"></span>now</span>
-          </h3>
-          <canvas id="p-lift"></canvas>
-        </div>
-        <div class="card chartcard">
-          <h3>Drag vs thrust
-            <span class="key"><span class="sw dash"></span>drag, clean</span>
-            <span class="key"><span class="sw" style="background:var(--accent)"></span>drag now</span>
-            <span class="key"><span class="sw" style="background:var(--warm)"></span>max thrust</span>
-          </h3>
-          <canvas id="p-drag"></canvas>
-        </div>
-      </div>
-      <div class="card">
-        <header><h2>Flight log</h2></header>
-        <ul class="log" id="p-log"></ul>
-      </div>
-      <div class="explain">
-        <section><h3>The physics</h3><p>The atmosphere follows the International Standard Atmosphere. Lift = ½ρV²S·C<sub>L</sub>. The finite wing's lift slope uses Prandtl's lifting-line correction, and induced drag is C<sub>L</sub>²/(πeAR). Above the critical Mach number, wave drag rises with Lock's fourth-power law. The point-mass equations of motion are integrated 50 times per simulated second.</p></section>
-        <section><h3>How ice hurts</h3><p>Ice grows at β·LWC·V/ρ<sub>ice</sub>. The collection efficiency β comes from the Langmuir–Blodgett droplet-impact fit. The loss of maximum lift and the extra drag scale with √(ice height ÷ chord), following trends reported in icing wind-tunnel studies. Glaze horns hurt more than rime.</p></section>
-        <section><h3>Why icing is a mid-altitude danger</h3><p>Cloud droplets stay liquid well below 0 °C, but colder than about −20 °C most clouds are ice crystals that don't stick. A jet cruising at 11 km (−56 °C) rarely picks up airframe ice. Turboprops and light aircraft fly at the altitudes where it forms.</p></section>
-      </div>
-    </div>
-  </section>
-
-  <!-- ================= 3D TUNNEL ================= -->
-  <section class="view" id="v-tunnel3d" hidden>
-    <div class="rail">
-      <div class="card">
-        <header><h2>Try a scenario</h2></header>
-        <div class="try" id="t-try">
-          <button data-p="crm">NASA airliner</button>
-          <button data-p="m6">Swept test wing</button>
-          <button data-p="tips">Wingtip vortices</button>
-          <button data-p="plane">Airliner</button>
-          <button data-p="iced">Iced wing</button>
-          <button data-p="stall3">3D stall</button>
-        </div>
-      </div>
-      <div class="card">
-        <header><h2>1 · Model</h2></header>
-        <select id="t-model" aria-label="Model">
-          <optgroup label="Real geometry">
-            <option value="crm" selected>NASA Common Research Model · airliner</option>
-            <option value="m6">ONERA M6 · swept test wing</option>
-            <option value="x57">NASA X-57 Maxwell · electric X-plane</option>
-            <option value="gh">NASA Global Hawk · high-altitude drone</option>
-          </optgroup>
-          <optgroup label="Simple shapes">
-            <option value="wing">Straight wing · adjustable</option>
-            <option value="plane">Simple airliner</option>
-          </optgroup>
-          <optgroup label="Your model">
-            <option value="custom" id="t-custom-opt" disabled>Load a file first</option>
-          </optgroup>
-        </select>
-        <div class="kind" id="t-info"></div>
-        <div class="row"><button class="btn primary" id="t-load">Load your own model…</button><input type="file" id="t-file" accept=".stl,.obj,.glb,.gltf" hidden></div>
-        <p class="lede">STL, OBJ or GLB, or drop a file onto the tunnel. Aircraft are assumed symmetric left to right.</p>
-        <div id="t-orient" class="row" hidden>
-          <button class="btn" data-o="turn">Turn 90°</button>
-          <button class="btn" data-o="nose">Flip nose</button>
-          <button class="btn" data-o="up">Change up axis</button>
-          <button class="btn" data-o="flip">Upside down</button>
-        </div>
-        <label class="switch" id="t-vox-ctl" hidden><input type="checkbox" id="t-voxview"><span>Show what the solver sees<small>Swap the smooth model for its voxels</small></span></label>
-        <div class="ctl" id="t-ar-ctl"><label for="t-ar">Aspect ratio <em>span ÷ chord</em></label><output id="t-ar-o"></output><input type="range" id="t-ar" min="2" max="8" step="0.5" value="5">
-          <div class="ends"><span>stubby</span><span>glider-like</span></div></div>
-        <label class="switch" id="t-ice-ctl"><input type="checkbox" id="t-ice"><span>Add ice from Wing view<small id="t-ice-note">No ice grown yet</small></span></label>
-        <p class="lede" id="t-secnote">The simple shapes use the airfoil chosen in the Wing view.</p>
-      </div>
-      <div class="card">
-        <header><h2>2 · Airflow</h2></header>
-        <div class="ctl"><label for="t-aoa">Tilt <em>angle of attack</em></label><output id="t-aoa-o"></output><input type="range" id="t-aoa" min="-6" max="24" step="0.5" value="8"></div>
-        <div class="ctl"><label for="t-re">Reynolds number</label><output id="t-re-o"></output><input type="range" id="t-re" min="0" max="1000" step="1" value="600"></div>
-      </div>
-      <div class="card">
-        <header><h2>3 · See the air</h2></header>
-        <label class="switch"><input type="checkbox" id="t-smoke" checked><span>Smoke particles</span></label>
-        <div class="ctl"><label>Slice through the flow</label></div>
-        <div class="seg" id="t-slice">
-          <button data-v="0" aria-pressed="false">Off</button>
-          <button data-v="1" aria-pressed="true">Behind</button>
-          <button data-v="3" aria-pressed="false">Along span</button>
-          <button data-v="2" aria-pressed="false">From above</button>
-        </div>
-        <div class="ctl"><label for="t-spos">Slice position</label><output id="t-spos-o"></output><input type="range" id="t-spos" min="0" max="1" step="0.01" value="0.62"></div>
-        <div class="seg" id="t-sq">
-          <button data-v="0" aria-pressed="false">Speed</button>
-          <button data-v="1" aria-pressed="false">Pressure</button>
-          <button data-v="2" aria-pressed="true">Spin</button>
-        </div>
-      </div>
-      <div class="card">
-        <header><h2>4 · Simulation</h2></header>
-        <div class="ctl"><label for="t-spf">Steps per frame</label><output id="t-spf-o"></output><input type="range" id="t-spf" min="1" max="20" step="1" value="6"></div>
-        <div class="row">
-          <select id="t-res" aria-label="3D grid">
-            <option value="low">Small grid · 0.5 M cells</option>
-            <option value="med" selected>Medium grid · 1 M cells</option>
-            <option value="high">Large grid · 2.2 M cells</option>
-          </select>
-          <button class="btn primary" id="t-play">Pause</button>
-          <button class="btn" id="t-reset">Restart flow</button>
-        </div>
-      </div>
-    </div>
-    <div class="main">
-      <div class="stage" id="t-stage">
-        <canvas class="view" id="t-view" aria-label="3D airflow around the model"></canvas>
-        <div class="hud tl">
-          <div class="pill"><div class="k">Lift C<sub>L</sub></div><div class="v" id="t-cl">…</div></div>
-          <div class="pill"><div class="k">Drag C<sub>D</sub></div><div class="v" id="t-cd">…</div></div>
-          <div class="pill"><div class="k">Lift ÷ drag</div><div class="v" id="t-ld">…</div></div>
-        </div>
-        <div class="hud tr"><div class="pill sm"><div class="k">GPU solver</div><div class="v" id="t-perf">—</div></div></div>
-        <div class="hud bl"><span class="note-tag">Drag to orbit · scroll or pinch to zoom</span></div>
-        <div class="camctl">
-          <button data-cam="persp">3/4 view</button><button data-cam="front">Front</button><button data-cam="side">Side</button><button data-cam="top">Top</button><button data-cam="behind">Behind</button>
-        </div>
-        <div class="nogpu" id="t-nogpu" hidden><div><b>WebGPU isn't available here</b><span id="t-nogpu-msg">This view runs a 3D fluid solver on your graphics card through WebGPU. Open the page in a recent Chrome or Edge (version 113 or later), or Safari 26. The Wing and Aircraft views work in any browser.</span></div></div>
-        <div class="toast" id="t-toast" hidden></div>
-      </div>
-      <div class="legend"><b id="t-lname">Spin</b><span id="t-lmin"></span><canvas id="t-bar" width="200" height="10"></canvas><span id="t-lmax"></span><span id="t-lnote"></span></div>
-      <div class="status">
-        <span class="chip neutral" id="t-chip">Starting up</span>
-        <span class="theory" id="t-theory"></span>
-      </div>
-      <div class="explain">
-        <section><h3>A real 3D solver</h3><p>This is a D3Q19 lattice Boltzmann solver with a Smagorinsky turbulence model, running as WebGPU compute shaders. Only one half of the model is simulated. A mirror boundary at the centreline doubles the resolution, which is standard practice in CFD.</p></section>
-        <section><h3>What to look for</h3><p>The wing pushes high-pressure air outward underneath and low-pressure air inward on top. At the tips the two meet and roll up into vortices. Slice the flow behind the wing in Spin mode to see them. They tilt the airflow down (downwash), which cuts lift and adds induced drag. This is why long, slender wings are more efficient.</p></section>
-        <section><h3>Limits</h3><p>The grid is about 1 million cells, so a wing chord spans roughly 10–20 cells and Reynolds numbers stay in the low thousands. The real models are drawn smooth, but the solver sees them as voxels; switch on "Show what the solver sees" to compare. Ice thinner than one cell won't show in 3D.</p></section>
-      </div>
-      <div class="card">
-        <header><h2>Where the models come from</h2></header>
-        <ul class="log">
-          <li><time>CRM</time><span>NASA Common Research Model, NASA Langley. Wing-body-tail surface from the 4th AIAA CFD Drag Prediction Workshop, distributed with the DAFoam tutorials. Decimated to 80,000 triangles.</span></li>
-          <li><time>M6</time><span>ONERA M6 wing (Schmitt &amp; Charpin, 1979). Surface taken from the SU2 project's validation mesh.</span></li>
-          <li><time>X-57</time><span>NASA X-57 Maxwell, NASA 3D Resources (public domain). Decimated to 83,000 triangles.</span></li>
-          <li><time>GH</time><span>NASA Global Hawk, NASA 3D Resources (public domain).</span></li>
-        </ul>
-        <p class="lede">NASA models are used under NASA's media guidelines and imply no endorsement by NASA.</p>
-      </div>
-    </div>
-  </section>
+  <footer class="status"><span id="st-left">Ready</span><span id="st-right"></span></footer>
 </div>
 
-<script src="shared.js"></script>
-<script src="wing.js"></script>
+<script src="core.js"></script>
+<script src="geom.js"></script>
 <script src="vlm.js"></script>
-<script src="designer.js"></script>
-<script src="plane.js"></script>
-<script src="tunnel3d.js"></script>
-<script src="app.js"></script>
+<script src="aero.js"></script>
+<script src="mod-geometry.js"></script>
+<script src="mod-airfoil.js"></script>
+<script src="mod-wing.js"></script>
+<script src="mod-flight.js"></script>
+<script src="mod-cfd3d.js"></script>
+<script src="shell.js"></script>
 
-</body></html>
+</body>
+</html>

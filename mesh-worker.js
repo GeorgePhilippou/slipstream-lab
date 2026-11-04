@@ -192,6 +192,9 @@ onmessage = e => {
       const o = m.orient === 'auto' ? guessOrientation(mesh.pos) : null;
       meshes[m.id] = mesh;
       postMessage({ type: 'parsed', rid: m.rid, id: m.id, tris: mesh.idx.length / 3, verts: mesh.pos.length / 3, guess: o });
+    } else if (m.type === 'setMesh') {
+      meshes[m.id] = { pos: m.pos, idx: m.idx };
+      postMessage({ type: 'parsed', rid: m.rid, id: m.id, tris: m.idx.length / 3, verts: m.pos.length / 3 });
     } else if (m.type === 'voxelize') {
       const mesh = meshes[m.id]; if (!mesh) throw new Error('Mesh not loaded');
       const P = transform(mesh.pos, m.T);
