@@ -3,273 +3,242 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Slipstream: an aircraft design and aerodynamics workstation in the browser: vortex-lattice analysis, 2D lattice Boltzmann with icing, flight dynamics and WebGPU 3D flow.">
+<meta name="description" content="Slipstream: fly your own aircraft and watch the air flow over it. Live physics for lift, stall, wingtip vortices and icing.">
 <title>Slipstream</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: engineering workstation. Top bar, left module list + property inspector, full-height viewport, right results dock, status bar. Single dark theme by design. */
+/* Layout: one full-screen live scene (aircraft in the sky with flowing air); glass panels float over it:
+   experiments (left), live gauges + wing cross-section (right), controls dock (bottom). On narrow screens the panels stack under the scene. */
 :root {
-  --bg: #111316;
-  --chrome: #16191d;
-  --panel: #191c21;
-  --raise: #21252b;
-  --line: #2a2f36;
-  --line-soft: #22262c;
-  --text: #d5dae0;
-  --muted: #8a929b;
-  --faint: #5e666f;
-  --accent: #5b9cf2;
-  --accent-dim: #22324a;
-  --ok: #5bb07c;
-  --warn: #d6a24a;
-  --crit: #e0625c;
-  --vp: #0e1013;
-  --vp-grid: rgba(150, 165, 180, 0.07);
-  --grid: #24292f;
-  --grid-strong: #343a42;
-  --sans: "Geist", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --ink: #f3f6fa;
+  --ink-2: #b9c6d4;
+  --ink-3: #8293a6;
+  --glass: rgba(10, 18, 28, 0.68);
+  --glass-2: rgba(255, 255, 255, 0.07);
+  --edge: rgba(255, 255, 255, 0.12);
+  --air: #7fd3ff;
+  --sun: #ffb547;
+  --good: #6fdc9b;
+  --warn: #ffcf5a;
+  --bad: #ff6b5e;
+  --bg: #0b1520;
+  --f-display: "Sora", "Segoe UI", system-ui, sans-serif;
+  --f-text: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-num: "JetBrains Mono", ui-monospace, Menlo, monospace;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
-body {
-  background: var(--bg); color: var(--text); font: 12.5px/1.45 var(--sans);
-  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 12px;
-}
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--f-text); overflow: hidden; }
 [hidden] { display: none !important; }
 button, input, select { font: inherit; color: inherit; }
-:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+:focus-visible { outline: 2px solid var(--air); outline-offset: 2px; }
 
-#app {
-  height: 100%; display: grid; border: 1px solid var(--line); background: var(--panel);
-  grid-template-columns: 292px minmax(0, 1fr) 328px; grid-template-rows: 38px minmax(0, 1fr) 24px;
-  grid-template-areas: "top top top" "left center right" "status status status";
-}
+.stage { position: fixed; inset: 0; }
+#scene { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+#scene:active { cursor: grabbing; }
+
+.ui { position: fixed; inset: 0; pointer-events: none;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: max(14px, env(safe-area-inset-top, 0px)) max(14px, env(safe-area-inset-bottom, 0px));
+  display: grid; grid-template-columns: 340px 1fr 320px; grid-template-rows: auto 1fr auto; gap: 14px;
+  grid-template-areas: "top top top" "left . right" "dock dock dock"; }
+.ui > * { pointer-events: auto; }
+.card { background: var(--glass); border: 1px solid var(--edge); border-radius: 14px; backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2); min-width: 0; }
+
 /* top bar */
-.top { grid-area: top; display: flex; align-items: center; gap: 14px; padding: 0 12px; background: var(--chrome); border-bottom: 1px solid var(--line); min-width: 0; }
-.brand { font-weight: 600; letter-spacing: .01em; white-space: nowrap; }
-.brand span { color: var(--faint); font-weight: 400; margin-left: 6px; }
-.top .sep { width: 1px; height: 18px; background: var(--line); flex: none; }
-.top select { background: var(--raise); border: 1px solid var(--line); border-radius: 3px; padding: 3px 6px; max-width: 220px; }
-.crumb { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.crumb b { color: var(--text); font-weight: 500; }
-.top .spacer { flex: 1; }
-.cond { font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.cond b { color: var(--text); font-weight: 400; }
+.top { grid-area: top; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; pointer-events: none; }
+.top > * { pointer-events: auto; }
+.brand { font: 700 19px/1 var(--f-display); letter-spacing: -0.01em; padding: 10px 14px; }
+.brand small { display: block; font: 500 11px/1.3 var(--f-text); color: var(--ink-2); letter-spacing: 0; margin-top: 3px; }
+.chips { display: flex; gap: 4px; padding: 4px; flex-wrap: wrap; }
+.chip { border: 0; background: transparent; padding: 7px 12px; border-radius: 9px; cursor: pointer; color: var(--ink-2); font-weight: 500; }
+.chip:hover { color: var(--ink); background: var(--glass-2); }
+.chip[aria-pressed="true"] { background: var(--ink); color: #0b1520; }
+.top .grow { flex: 1; }
+.views { display: flex; gap: 2px; padding: 4px; }
+.views button { border: 0; background: transparent; padding: 7px 10px; border-radius: 9px; color: var(--ink-2); cursor: pointer; }
+.views button:hover { color: var(--ink); background: var(--glass-2); }
+.views button[aria-pressed="true"] { color: var(--ink); background: var(--glass-2); box-shadow: inset 0 0 0 1px var(--edge); }
+.link { color: var(--ink-2); text-decoration: none; padding: 9px 12px; font-weight: 500; }
+.link:hover { color: var(--ink); }
 
-/* left dock */
-.left { grid-area: left; border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
-.mods { list-style: none; margin: 0; padding: 6px 0; border-bottom: 1px solid var(--line); }
-.mods a { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 6px; padding: 5px 12px; color: var(--muted); text-decoration: none; border-left: 2px solid transparent; }
-.mods a:hover { background: var(--raise); color: var(--text); }
-.mods a[aria-current="page"] { color: var(--text); background: var(--raise); border-left-color: var(--accent); }
-.mods .code { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
-.mods .meth { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
-.dock-h { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); padding: 8px 12px 4px; display: flex; justify-content: space-between; }
-.scroll { overflow: auto; min-height: 0; flex: 1; }
+/* experiments */
+.exp { grid-area: left; align-self: start; padding: 16px; display: flex; flex-direction: column; gap: 12px; max-height: 100%; overflow: auto; }
+.exp h2 { margin: 0; font: 600 16px/1.2 var(--f-display); }
+.exp .lede { margin: 0; color: var(--ink-2); font-size: 13px; }
+.exp-list { display: flex; flex-direction: column; gap: 6px; }
+.exp-item { display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: center; text-align: left; background: var(--glass-2); border: 1px solid transparent; border-radius: 10px; padding: 9px 10px; cursor: pointer; }
+.exp-item:hover { border-color: var(--edge); }
+.exp-item .n { font: 600 12px/1 var(--f-num); color: var(--ink-3); width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: rgba(255,255,255,.06); }
+.exp-item b { display: block; font-weight: 600; }
+.exp-item span { display: block; font-size: 12.5px; color: var(--ink-2); }
+.step-k { font: 500 11px/1 var(--f-num); color: var(--air); letter-spacing: .06em; text-transform: uppercase; }
+.step-t { font: 600 17px/1.3 var(--f-display); margin: 0; text-wrap: balance; }
+.step-b { margin: 0; color: var(--ink-2); max-width: 46ch; }
+.step-b b { color: var(--ink); font-weight: 600; }
+.dots { display: flex; gap: 5px; }
+.dots i { width: 22px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.16); }
+.dots i.on { background: var(--air); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.btn { border: 1px solid var(--edge); background: var(--glass-2); padding: 8px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; }
+.btn:hover { background: rgba(255,255,255,.12); }
+.btn.primary { background: var(--ink); color: #0b1520; border-color: var(--ink); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--ink-2); padding-inline: 6px; }
 
-/* inspector */
-details.sec { border-bottom: 1px solid var(--line-soft); }
-details.sec > summary { list-style: none; cursor: pointer; padding: 7px 12px; font-weight: 500; display: flex; align-items: center; gap: 6px; user-select: none; }
-details.sec > summary::-webkit-details-marker { display: none; }
-details.sec > summary::before { content: ""; width: 0; height: 0; border-left: 4px solid var(--faint); border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
-details.sec[open] > summary::before { transform: rotate(90deg); }
-.sec-body { padding: 2px 12px 10px; display: flex; flex-direction: column; gap: 5px; }
-.field { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 24px; }
-.field > label { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.field.num { grid-template-columns: 104px minmax(0, 1fr) 56px 30px; }
-.field .unit { color: var(--faint); font-family: var(--mono); font-size: 10.5px; }
-.field .val { width: 56px; background: var(--raise); border: 1px solid var(--line); border-radius: 2px; padding: 2px 5px; font-family: var(--mono); font-size: 11.5px; text-align: right; }
-.field .val:focus { border-color: var(--accent); outline: none; }
-.field select { background: var(--raise); border: 1px solid var(--line); border-radius: 2px; padding: 3px 5px; min-width: 0; width: 100%; }
-.field .ro { font-family: var(--mono); font-size: 11.5px; text-align: right; }
-input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; background: transparent; height: 18px; margin: 0; }
-input[type=range]::-webkit-slider-runnable-track { height: 2px; background: var(--line); }
-input[type=range]::-moz-range-track { height: 2px; background: var(--line); }
-input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; margin-top: -4px; background: var(--text); border-radius: 1px; border: 0; }
-input[type=range]::-moz-range-thumb { width: 10px; height: 10px; background: var(--text); border-radius: 1px; border: 0; }
-input[type=range]:focus-visible { outline: none; }
-input[type=range]:focus-visible::-webkit-slider-thumb { background: var(--accent); }
-input.tog { -webkit-appearance: none; appearance: none; width: 26px; height: 14px; background: var(--line); border-radius: 7px; position: relative; cursor: pointer; justify-self: start; margin: 0; }
-input.tog::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
-input.tog:checked { background: var(--accent-dim); }
-input.tog:checked::after { left: 14px; background: var(--accent); }
-.segm { display: flex; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; min-width: 0; }
-.segm button { flex: 1 1 0; min-width: 0; background: transparent; border: 0; border-right: 1px solid var(--line); padding: 3px 4px; color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.segm button:last-child { border-right: 0; }
-.segm button[aria-pressed="true"] { background: var(--accent-dim); color: var(--text); }
-.row-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
-.btn { background: var(--raise); border: 1px solid var(--line); border-radius: 3px; padding: 4px 10px; cursor: pointer; }
-.btn:hover { border-color: var(--faint); }
-.btn.primary { background: var(--accent-dim); border-color: #33507a; }
-.note { margin: 2px 0; color: var(--muted); font-size: 11.5px; }
-.note b { color: var(--text); font-weight: 500; }
+/* gauges */
+.side { grid-area: right; align-self: start; display: flex; flex-direction: column; gap: 14px; max-height: 100%; overflow: auto; }
+.gauges { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.g-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: baseline; }
+.g-row .k { color: var(--ink-2); font-size: 12.5px; }
+.g-row .v { font: 500 15px/1.1 var(--f-num); font-variant-numeric: tabular-nums; }
+.bar { grid-column: 1 / -1; height: 8px; border-radius: 5px; background: rgba(255,255,255,.1); position: relative; overflow: hidden; }
+.bar i { position: absolute; inset: 0 auto 0 0; border-radius: 5px; background: var(--air); }
+.bar .tick { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ink); opacity: .7; }
+.minis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mini { background: var(--glass-2); border-radius: 10px; padding: 7px 9px; min-width: 0; }
+.mini .k { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+.mini .v { font: 500 14px/1.2 var(--f-num); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.state { font: 600 13px/1.2 var(--f-display); padding: 6px 10px; border-radius: 8px; text-align: center; background: rgba(111,220,155,.14); color: var(--good); }
+.state.warn { background: rgba(255,207,90,.14); color: var(--warn); }
+.state.bad { background: rgba(255,107,94,.18); color: var(--bad); }
+.section { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+.section h3 { margin: 0; font: 600 13px/1.2 var(--f-display); display: flex; justify-content: space-between; gap: 8px; }
+.section h3 span { font: 400 11.5px var(--f-text); color: var(--ink-3); }
+#sec { width: 100%; aspect-ratio: 2.1 / 1; border-radius: 8px; display: block; background: #071019; }
+.section p { margin: 0; font-size: 12px; color: var(--ink-2); }
 
-/* centre viewport */
-.center { grid-area: center; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--vp); }
-.vp-bar { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-bottom: 1px solid var(--line); background: var(--chrome); flex-wrap: wrap; min-height: 33px; }
-.vp-bar .segm { flex: none; }
-.vp-bar .segm button { padding: 2px 9px; flex: none; overflow: visible; }
-.vp-bar .lab { color: var(--faint); font-size: 11px; }
-.vp-bar .grow { flex: 1; }
-.vp-bar .chk { display: flex; gap: 5px; align-items: center; color: var(--muted); }
-.vp { position: relative; flex: 1; min-height: 0; overflow: hidden; }
-.vp canvas.layer { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.vp-hud { position: absolute; top: 8px; left: 8px; font-family: var(--mono); font-size: 11px; color: var(--muted); background: rgba(14, 16, 19, .78); border: 1px solid var(--line-soft); padding: 4px 7px; pointer-events: none; line-height: 1.5; }
-.vp-hud b { color: var(--text); font-weight: 400; }
-#vp-legend { position: absolute; left: 8px; bottom: 8px; display: grid; grid-template-columns: auto auto auto; gap: 2px 6px; align-items: center; font-family: var(--mono); font-size: 10.5px; color: var(--muted); background: rgba(14, 16, 19, .78); border: 1px solid var(--line-soft); padding: 5px 7px; pointer-events: none; }
-#vp-legend .t { grid-column: 1 / -1; color: var(--text); }
-#vp-cbar { width: 150px; height: 8px; }
-#vp-toast { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); background: var(--chrome); border: 1px solid var(--line); padding: 10px 14px; max-width: min(440px, 86%); color: var(--text); text-align: center; }
-.vp-empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: var(--muted); padding: 24px; }
-.vp-empty div { max-width: 460px; }
-.vp-empty b { display: block; color: var(--text); font-weight: 500; margin-bottom: 6px; font-size: 14px; }
+/* dock */
+.dock { grid-area: dock; padding: 12px 16px; display: flex; gap: 18px 22px; align-items: center; flex-wrap: wrap; }
+.grp { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.grp > .gl { font: 500 11px/1 var(--f-num); color: var(--ink-3); text-transform: uppercase; letter-spacing: .08em; }
+.ctls { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.sl { display: grid; grid-template-columns: auto auto; gap: 2px 10px; width: 150px; }
+.sl label { font-size: 12.5px; color: var(--ink-2); }
+.sl output { font: 500 12.5px var(--f-num); text-align: right; }
+.sl input { grid-column: 1 / -1; width: 100%; }
+input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; height: 20px; margin: 0; }
+input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 3px; background: rgba(255,255,255,.18); }
+input[type=range]::-moz-range-track { height: 4px; border-radius: 3px; background: rgba(255,255,255,.18); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; margin-top: -6px; background: var(--ink); border: 0; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--ink); border: 0; }
+input[type=range]:disabled { opacity: .35; }
+.seg { display: flex; padding: 3px; gap: 2px; background: rgba(255,255,255,.06); border-radius: 10px; }
+.seg button { border: 0; background: transparent; padding: 6px 11px; border-radius: 8px; color: var(--ink-2); cursor: pointer; font-weight: 500; white-space: nowrap; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: #0b1520; }
+.tg { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+.tg input { -webkit-appearance: none; appearance: none; width: 34px; height: 20px; border-radius: 10px; background: rgba(255,255,255,.18); position: relative; margin: 0; cursor: pointer; }
+.tg input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--ink-2); transition: left .12s; }
+.tg input:checked { background: var(--air); }
+.tg input:checked::after { left: 17px; background: #0b1520; }
+.dock .sep { width: 1px; align-self: stretch; background: var(--edge); }
 
-/* right dock */
-.right { grid-area: right; border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
-.res { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px; }
-.res h4 { margin: 8px 0 0; font-size: 10.5px; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); display: flex; justify-content: space-between; gap: 8px; }
-.res h4 span { text-transform: none; letter-spacing: 0; font-family: var(--mono); }
-dl.kv { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; margin: 0; }
-dl.kv dt { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-dl.kv dd { margin: 0; font-family: var(--mono); font-size: 11.5px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-dl.kv dd.big { font-size: 15px; color: var(--text); }
-dl.kv .kv-gap { grid-column: 1 / -1; height: 1px; background: var(--line-soft); margin: 3px 0; }
-dd.ok, .ok { color: var(--ok); } dd.warn, .warn { color: var(--warn); } dd.crit, .crit { color: var(--crit); }
-.badges { display: flex; flex-wrap: wrap; gap: 4px; }
-.badge { font-size: 11px; padding: 1px 6px; border: 1px solid currentColor; border-radius: 2px; white-space: nowrap; }
-.badge.neutral { color: var(--muted); }
-.plot { width: 100%; height: 150px; display: block; }
-.leg { display: flex; flex-wrap: wrap; gap: 2px 10px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
-.leg i { display: inline-block; width: 12px; height: 2px; vertical-align: middle; margin-right: 4px; }
-.leg i.dash { background: repeating-linear-gradient(90deg, currentColor 0 3px, transparent 3px 6px) !important; height: 1.5px; }
-.log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; }
-.log li { display: grid; grid-template-columns: 44px 1fr; gap: 6px; }
-.log time { font-family: var(--mono); color: var(--faint); }
-.ref { color: var(--muted); font-size: 11.5px; margin: 0; }
-.ref b { color: var(--text); font-weight: 500; }
+/* overlay callouts on the scene */
+#banner { position: fixed; left: 50%; top: 84px; transform: translateX(-50%); font: 700 14px/1 var(--f-display); letter-spacing: .14em; text-transform: uppercase; padding: 9px 16px; border-radius: 10px; pointer-events: none; }
+#banner.bad { background: var(--bad); color: #1a0705; }
+#banner.warn { background: var(--warn); color: #1d1500; }
+#toast { position: fixed; left: 50%; top: 45%; transform: translate(-50%, -50%); background: var(--glass); border: 1px solid var(--edge); padding: 12px 16px; border-radius: 12px; max-width: min(440px, 86vw); text-align: center; backdrop-filter: blur(12px); }
+#err { position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%); background: #3a1414; border: 1px solid var(--bad); padding: 8px 12px; border-radius: 10px; max-width: 92vw; font: 12px var(--f-num); z-index: 30; }
 
-#guide { position: fixed; inset: 0; background: rgba(8, 10, 12, .72); display: grid; place-items: center; z-index: 20; padding: 16px; }
-.g-box { background: var(--panel); border: 1px solid var(--line); max-width: 620px; width: 100%; max-height: 90vh; overflow: auto; padding: 16px 20px; }
-.g-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
-.g-head b { font-size: 15px; font-weight: 600; }
-.g-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; color: var(--muted); max-width: 65ch; }
-.g-steps b { color: var(--text); font-weight: 500; }
-.g-note { color: var(--faint); margin: 12px 0 0; }
-#err { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); background: #3a1b1b; border: 1px solid var(--crit); color: var(--text); padding: 8px 12px; max-width: min(640px, 92vw); z-index: 30; font-family: var(--mono); font-size: 11.5px; }
-/* status bar */
-.status { grid-area: status; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 10px; background: var(--chrome); border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11px; color: var(--muted); min-width: 0; }
-.status span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-/* narrower screens: results dock moves under the viewport, page scrolls */
-@media (max-width: 1180px) {
-  html, body { height: auto; }
-  #app { height: auto; grid-template-columns: 280px minmax(0, 1fr); grid-template-rows: 38px 64vh auto 24px;
-    grid-template-areas: "top top" "left center" "left right" "status status"; }
-  .right { border-top: 1px solid var(--line); }
-  .left .scroll { max-height: none; }
+@media (max-width: 1100px) { .ui { grid-template-columns: 300px 1fr 290px; } .sl { width: 132px; } }
+@media (max-width: 880px) {
+  body { overflow: auto; }
+  .stage { position: relative; height: 58vh; }
+  .ui { position: static; display: flex; flex-direction: column; pointer-events: auto; }
+  .top { order: -1; }
+  .exp, .side { max-height: none; }
+  .sl { width: calc(50% - 8px); }
+  #banner { top: 12px; position: absolute; }
 }
-@media (max-width: 760px) {
-  #app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 58vh auto auto 24px; grid-template-areas: "top" "center" "left" "right" "status"; }
-  .top { flex-wrap: wrap; padding: 6px 10px; gap: 8px; }
-  .cond { flex-basis: 100%; }
-  .left { border-right: 0; border-top: 1px solid var(--line); }
-  .mods { display: flex; overflow-x: auto; }
-  .mods a { grid-template-columns: auto; border-left: 0; border-bottom: 2px solid transparent; white-space: nowrap; }
-  .mods a[aria-current="page"] { border-bottom-color: var(--accent); }
-  .mods .code, .mods .meth { display: none; }
-  .field.num { grid-template-columns: 96px minmax(0, 1fr) 56px 28px; }
-}
+@media (prefers-reduced-motion: reduce) { .tg input::after { transition: none; } }
 </style>
-
 </head>
 <body>
-<div id="app">
+<div class="stage"><canvas id="scene" aria-label="Your aircraft in flight with the airflow around it"></canvas></div>
+<div id="banner" hidden></div>
+<div id="toast" hidden></div>
+
+<div class="ui">
   <header class="top">
-    <div class="brand">Slipstream<span>aero lab</span></div>
-    <div class="sep"></div>
-    <select id="project" aria-label="Project">
-      <option value="trainer">Light trainer</option>
-      <option value="glider">Sailplane</option>
-      <option value="turboprop">Regional turboprop</option>
-      <option value="airliner">Airliner on approach</option>
-      <option value="swept">Swept wing, no twist</option>
-      <option value="forward">Forward-swept wing</option>
-    </select>
-    <div class="crumb" id="crumb"></div>
-    <div class="spacer"></div>
-    <div class="cond" id="cond"></div>
-    <button class="btn" id="guide-btn" type="button">Guide</button>
+    <div class="brand card">Slipstream<small>Fly a wing. Watch the air.</small></div>
+    <div class="chips card" id="aircraft" role="group" aria-label="Aircraft">
+      <button class="chip" data-k="trainer" aria-pressed="true">Light trainer</button>
+      <button class="chip" data-k="glider" aria-pressed="false">Sailplane</button>
+      <button class="chip" data-k="turboprop" aria-pressed="false">Turboprop</button>
+      <button class="chip" data-k="airliner" aria-pressed="false">Airliner</button>
+    </div>
+    <div class="grow"></div>
+    <div class="views card" id="views" role="group" aria-label="Camera">
+      <button data-v="chase" aria-pressed="true">Chase</button>
+      <button data-v="side" aria-pressed="false">Side</button>
+      <button data-v="front" aria-pressed="false">Front</button>
+      <button data-v="top" aria-pressed="false">Above</button>
+      <button data-v="tip" aria-pressed="false">Wingtip</button>
+    </div>
+    <a class="link card" href="lab.html">Engineering view</a>
   </header>
 
-  <aside class="left" aria-label="Modules and properties">
-    <nav aria-label="Modules">
-      <div class="dock-h">Modules</div>
-      <ul class="mods" id="mods">
-        <li><a href="#geometry"><span class="code">GEO</span>Geometry<span class="meth">edit</span></a></li>
-        <li><a href="#airfoil"><span class="code">2D</span>Airfoil<span class="meth">LBM</span></a></li>
-        <li><a href="#wing"><span class="code">VLM</span>Wing and tail<span class="meth">VLM</span></a></li>
-        <li><a href="#flight"><span class="code">FLT</span>Flight and icing<span class="meth">3-DOF</span></a></li>
-        <li><a href="#cfd3d"><span class="code">3D</span>3D flow<span class="meth">GPU</span></a></li>
-      </ul>
-    </nav>
-    <div class="dock-h"><span>Properties</span><span id="insp-note"></span></div>
-    <div class="scroll" id="inspector"></div>
-  </aside>
+  <section class="exp card" id="exp" aria-label="Experiments"></section>
 
-  <main class="center">
-    <div class="vp-bar" id="vp-bar"></div>
-    <div class="vp" id="vp">
-      <canvas class="layer" id="cv-geometry" hidden></canvas>
-      <canvas class="layer" id="cv-wing" hidden></canvas>
-      <canvas class="layer" id="cv-airfoil" hidden></canvas>
-      <canvas class="layer" id="cv-flight" hidden></canvas>
-      <canvas class="layer" id="cv-cfd3d" hidden></canvas>
-      <div class="vp-empty" id="vp-empty" hidden><div><b id="vp-empty-t"></b><span id="vp-empty-m"></span></div></div>
-      <div class="vp-hud" id="vp-hud" hidden></div>
-      <div id="vp-legend" hidden><span class="t" id="vp-lt"></span><span id="vp-lmin"></span><canvas id="vp-cbar" width="150" height="8"></canvas><span id="vp-lmax"></span></div>
-      <div id="vp-toast" hidden></div>
+  <aside class="side">
+    <div class="gauges card" aria-label="Live readings">
+      <div class="state" id="g-state">Cruising</div>
+      <div class="g-row"><span class="k">Lift compared with weight</span><span class="v" id="g-lw">—</span><div class="bar"><i id="g-lw-bar"></i><span class="tick" style="left:50%"></span></div></div>
+      <div class="g-row"><span class="k">How close to a stall</span><span class="v" id="g-st">—</span><div class="bar"><i id="g-st-bar"></i></div></div>
+      <div class="minis">
+        <div class="mini"><div class="k">Airspeed</div><div class="v" id="g-v">—</div></div>
+        <div class="mini"><div class="k">Altitude</div><div class="v" id="g-h">—</div></div>
+        <div class="mini"><div class="k">Climb</div><div class="v" id="g-vs">—</div></div>
+        <div class="mini"><div class="k">Wing angle</div><div class="v" id="g-a">—</div></div>
+        <div class="mini"><div class="k">Lift ÷ drag</div><div class="v" id="g-ld">—</div></div>
+        <div class="mini"><div class="k">Ice</div><div class="v" id="g-ice">—</div></div>
+      </div>
     </div>
-  </main>
-
-  <aside class="right" aria-label="Results">
-    <div class="dock-h"><span>Results</span><span id="res-note"></span></div>
-    <div class="scroll"><div class="res" id="results"></div></div>
+    <div class="section card">
+      <h3>Inside the wing's airflow <span id="sec-note">live 2D simulation</span></h3>
+      <canvas id="sec" aria-label="Cross-section of the wing with simulated airflow"></canvas>
+      <p id="sec-cap">A slice through your wing at the same angle. White smoke shows the air; watch it peel away from the top surface in a stall.</p>
+    </div>
   </aside>
 
-  <footer class="status"><span id="st-left">Ready</span><span id="st-right"></span></footer>
+  <section class="dock card" aria-label="Controls">
+    <div class="grp"><span class="gl">Mode</span>
+      <div class="seg" id="mode" role="group" aria-label="Mode"><button data-v="fly" aria-pressed="true">Fly</button><button data-v="tunnel" aria-pressed="false">Wind tunnel</button></div>
+    </div>
+    <div class="sep"></div>
+    <div class="grp"><span class="gl">Flight</span>
+      <div class="ctls">
+        <div class="sl"><label for="c-speed">Speed</label><output id="c-speed-o"></output><input type="range" id="c-speed"></div>
+        <div class="sl"><label for="c-alt">Altitude</label><output id="c-alt-o"></output><input type="range" id="c-alt" min="0" max="12000" step="100"></div>
+        <div class="sl"><label for="c-aoa">Wing angle</label><output id="c-aoa-o"></output><input type="range" id="c-aoa" min="-4" max="24" step="0.5"></div>
+      </div>
+    </div>
+    <div class="sep"></div>
+    <div class="grp"><span class="gl">Wing</span>
+      <div class="ctls">
+        <div class="sl"><label for="c-span">Span</label><output id="c-span-o"></output><input type="range" id="c-span"></div>
+        <div class="sl"><label for="c-sweep">Sweep</label><output id="c-sweep-o"></output><input type="range" id="c-sweep" min="-25" max="45" step="1"></div>
+        <label class="tg"><input type="checkbox" id="c-wl">Winglets</label>
+      </div>
+    </div>
+    <div class="sep"></div>
+    <div class="grp"><span class="gl">Weather</span>
+      <div class="ctls">
+        <label class="tg"><input type="checkbox" id="c-cloud">Fly in cloud</label>
+        <button class="btn" id="c-deice" type="button">De-ice</button>
+        <div class="seg" id="c-time" role="group" aria-label="Time speed"><button data-v="1" aria-pressed="true">1×</button><button data-v="10" aria-pressed="false">10×</button><button data-v="60" aria-pressed="false">60×</button></div>
+      </div>
+    </div>
+  </section>
 </div>
 
-
-<div id="guide" hidden role="dialog" aria-modal="true" aria-labelledby="guide-t">
-  <div class="g-box">
-    <div class="g-head"><b id="guide-t">How to use Slipstream</b><button class="btn" id="guide-x" type="button">Close</button></div>
-    <ol class="g-steps">
-      <li><b>Pick an aircraft.</b> Use the menu at the top left (Light trainer, Sailplane, Airliner…). Everything works on that one aircraft.</li>
-      <li><b>Choose a module</b> from the list on the left. The <b>Properties</b> under it are the inputs; the <b>Results</b> on the right update instantly.</li>
-      <li><b>Geometry</b>: drag a slider or type in a box (Span, Sweep, Taper…) and the 3D model changes. Drag the model to rotate it; scroll to zoom.</li>
-      <li><b>Wing and tail</b>: lift, drag, stall and stability of your design. Use the toolbar to colour the wing by loading or by stall margin, then press <b>Trim with tail incidence</b>.</li>
-      <li><b>Airfoil</b>: a live 2D airflow simulation around your wing section. It starts by itself; change the angle of attack, or switch on <b>Supercooled cloud</b> under Icing to grow ice.</li>
-      <li><b>Flight and icing</b>: flies your design. Switch on <b>In cloud</b>, or open <b>Scenarios</b> and choose “Hold in icing cloud”, then watch the event log.</li>
-      <li><b>3D flow</b>: 3D airflow on your graphics card. Needs Chrome or Edge 113+, or Safari 26. Drop an STL, OBJ or GLB file on it to test your own model.</li>
-    </ol>
-    <p class="g-note">The status bar at the bottom shows what the solver is doing. If something fails in your browser, the error appears there too.</p>
-  </div>
-</div>
-
-<script src="core.js?v=5"></script>
-<script src="geom.js?v=5"></script>
-<script src="vlm.js?v=5"></script>
-<script src="aero.js?v=5"></script>
-<script src="mod-geometry.js?v=5"></script>
-<script src="mod-airfoil.js?v=5"></script>
-<script src="mod-wing.js?v=5"></script>
-<script src="mod-flight.js?v=5"></script>
-<script src="mod-cfd3d.js?v=5"></script>
-<script src="shell.js?v=5"></script>
-
+<script src="vendor/three-0.149.0.min.js"></script>
+<script src="core.js?v=6"></script>
+<script src="geom.js?v=6"></script>
+<script src="vlm.js?v=6"></script>
+<script src="aero.js?v=6"></script>
+<script src="fly.js?v=6"></script>
 </body>
 </html>

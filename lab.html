@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Slipstream: an aircraft design and aerodynamics workstation in the browser: vortex-lattice analysis, 2D lattice Boltzmann with icing, flight dynamics and WebGPU 3D flow.">
+<title>Slipstream</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: engineering workstation. Top bar, left module list + property inspector, full-height viewport, right results dock, status bar. Single dark theme by design. */
+:root {
+  --bg: #111316;
+  --chrome: #16191d;
+  --panel: #191c21;
+  --raise: #21252b;
+  --line: #2a2f36;
+  --line-soft: #22262c;
+  --text: #d5dae0;
+  --muted: #8a929b;
+  --faint: #5e666f;
+  --accent: #5b9cf2;
+  --accent-dim: #22324a;
+  --ok: #5bb07c;
+  --warn: #d6a24a;
+  --crit: #e0625c;
+  --vp: #0e1013;
+  --vp-grid: rgba(150, 165, 180, 0.07);
+  --grid: #24292f;
+  --grid-strong: #343a42;
+  --sans: "Geist", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--text); font: 12.5px/1.45 var(--sans);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 12px;
+}
+[hidden] { display: none !important; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+#app {
+  height: 100%; display: grid; border: 1px solid var(--line); background: var(--panel);
+  grid-template-columns: 292px minmax(0, 1fr) 328px; grid-template-rows: 38px minmax(0, 1fr) 24px;
+  grid-template-areas: "top top top" "left center right" "status status status";
+}
+/* top bar */
+.top { grid-area: top; display: flex; align-items: center; gap: 14px; padding: 0 12px; background: var(--chrome); border-bottom: 1px solid var(--line); min-width: 0; }
+.brand { font-weight: 600; letter-spacing: .01em; white-space: nowrap; }
+.brand span { color: var(--faint); font-weight: 400; margin-left: 6px; }
+.top .sep { width: 1px; height: 18px; background: var(--line); flex: none; }
+.top select { background: var(--raise); border: 1px solid var(--line); border-radius: 3px; padding: 3px 6px; max-width: 220px; }
+.crumb { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crumb b { color: var(--text); font-weight: 500; }
+.top .spacer { flex: 1; }
+.cond { font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cond b { color: var(--text); font-weight: 400; }
+
+/* left dock */
+.left { grid-area: left; border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
+.mods { list-style: none; margin: 0; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.mods a { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 6px; padding: 5px 12px; color: var(--muted); text-decoration: none; border-left: 2px solid transparent; }
+.mods a:hover { background: var(--raise); color: var(--text); }
+.mods a[aria-current="page"] { color: var(--text); background: var(--raise); border-left-color: var(--accent); }
+.mods .code { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+.mods .meth { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+.dock-h { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); padding: 8px 12px 4px; display: flex; justify-content: space-between; }
+.scroll { overflow: auto; min-height: 0; flex: 1; }
+
+/* inspector */
+details.sec { border-bottom: 1px solid var(--line-soft); }
+details.sec > summary { list-style: none; cursor: pointer; padding: 7px 12px; font-weight: 500; display: flex; align-items: center; gap: 6px; user-select: none; }
+details.sec > summary::-webkit-details-marker { display: none; }
+details.sec > summary::before { content: ""; width: 0; height: 0; border-left: 4px solid var(--faint); border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+details.sec[open] > summary::before { transform: rotate(90deg); }
+.sec-body { padding: 2px 12px 10px; display: flex; flex-direction: column; gap: 5px; }
+.field { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 24px; }
+.field > label { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.field.num { grid-template-columns: 104px minmax(0, 1fr) 56px 30px; }
+.field .unit { color: var(--faint); font-family: var(--mono); font-size: 10.5px; }
+.field .val { width: 56px; background: var(--raise); border: 1px solid var(--line); border-radius: 2px; padding: 2px 5px; font-family: var(--mono); font-size: 11.5px; text-align: right; }
+.field .val:focus { border-color: var(--accent); outline: none; }
+.field select { background: var(--raise); border: 1px solid var(--line); border-radius: 2px; padding: 3px 5px; min-width: 0; width: 100%; }
+.field .ro { font-family: var(--mono); font-size: 11.5px; text-align: right; }
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; background: transparent; height: 18px; margin: 0; }
+input[type=range]::-webkit-slider-runnable-track { height: 2px; background: var(--line); }
+input[type=range]::-moz-range-track { height: 2px; background: var(--line); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; margin-top: -4px; background: var(--text); border-radius: 1px; border: 0; }
+input[type=range]::-moz-range-thumb { width: 10px; height: 10px; background: var(--text); border-radius: 1px; border: 0; }
+input[type=range]:focus-visible { outline: none; }
+input[type=range]:focus-visible::-webkit-slider-thumb { background: var(--accent); }
+input.tog { -webkit-appearance: none; appearance: none; width: 26px; height: 14px; background: var(--line); border-radius: 7px; position: relative; cursor: pointer; justify-self: start; margin: 0; }
+input.tog::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+input.tog:checked { background: var(--accent-dim); }
+input.tog:checked::after { left: 14px; background: var(--accent); }
+.segm { display: flex; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; min-width: 0; }
+.segm button { flex: 1 1 0; min-width: 0; background: transparent; border: 0; border-right: 1px solid var(--line); padding: 3px 4px; color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.segm button:last-child { border-right: 0; }
+.segm button[aria-pressed="true"] { background: var(--accent-dim); color: var(--text); }
+.row-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.btn { background: var(--raise); border: 1px solid var(--line); border-radius: 3px; padding: 4px 10px; cursor: pointer; }
+.btn:hover { border-color: var(--faint); }
+.btn.primary { background: var(--accent-dim); border-color: #33507a; }
+.note { margin: 2px 0; color: var(--muted); font-size: 11.5px; }
+.note b { color: var(--text); font-weight: 500; }
+
+/* centre viewport */
+.center { grid-area: center; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--vp); }
+.vp-bar { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-bottom: 1px solid var(--line); background: var(--chrome); flex-wrap: wrap; min-height: 33px; }
+.vp-bar .segm { flex: none; }
+.vp-bar .segm button { padding: 2px 9px; flex: none; overflow: visible; }
+.vp-bar .lab { color: var(--faint); font-size: 11px; }
+.vp-bar .grow { flex: 1; }
+.vp-bar .chk { display: flex; gap: 5px; align-items: center; color: var(--muted); }
+.vp { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.vp canvas.layer { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.vp-hud { position: absolute; top: 8px; left: 8px; font-family: var(--mono); font-size: 11px; color: var(--muted); background: rgba(14, 16, 19, .78); border: 1px solid var(--line-soft); padding: 4px 7px; pointer-events: none; line-height: 1.5; }
+.vp-hud b { color: var(--text); font-weight: 400; }
+#vp-legend { position: absolute; left: 8px; bottom: 8px; display: grid; grid-template-columns: auto auto auto; gap: 2px 6px; align-items: center; font-family: var(--mono); font-size: 10.5px; color: var(--muted); background: rgba(14, 16, 19, .78); border: 1px solid var(--line-soft); padding: 5px 7px; pointer-events: none; }
+#vp-legend .t { grid-column: 1 / -1; color: var(--text); }
+#vp-cbar { width: 150px; height: 8px; }
+#vp-toast { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); background: var(--chrome); border: 1px solid var(--line); padding: 10px 14px; max-width: min(440px, 86%); color: var(--text); text-align: center; }
+.vp-empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: var(--muted); padding: 24px; }
+.vp-empty div { max-width: 460px; }
+.vp-empty b { display: block; color: var(--text); font-weight: 500; margin-bottom: 6px; font-size: 14px; }
+
+/* right dock */
+.right { grid-area: right; border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
+.res { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+.res h4 { margin: 8px 0 0; font-size: 10.5px; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); display: flex; justify-content: space-between; gap: 8px; }
+.res h4 span { text-transform: none; letter-spacing: 0; font-family: var(--mono); }
+dl.kv { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; margin: 0; }
+dl.kv dt { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+dl.kv dd { margin: 0; font-family: var(--mono); font-size: 11.5px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+dl.kv dd.big { font-size: 15px; color: var(--text); }
+dl.kv .kv-gap { grid-column: 1 / -1; height: 1px; background: var(--line-soft); margin: 3px 0; }
+dd.ok, .ok { color: var(--ok); } dd.warn, .warn { color: var(--warn); } dd.crit, .crit { color: var(--crit); }
+.badges { display: flex; flex-wrap: wrap; gap: 4px; }
+.badge { font-size: 11px; padding: 1px 6px; border: 1px solid currentColor; border-radius: 2px; white-space: nowrap; }
+.badge.neutral { color: var(--muted); }
+.plot { width: 100%; height: 150px; display: block; }
+.leg { display: flex; flex-wrap: wrap; gap: 2px 10px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.leg i { display: inline-block; width: 12px; height: 2px; vertical-align: middle; margin-right: 4px; }
+.leg i.dash { background: repeating-linear-gradient(90deg, currentColor 0 3px, transparent 3px 6px) !important; height: 1.5px; }
+.log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; }
+.log li { display: grid; grid-template-columns: 44px 1fr; gap: 6px; }
+.log time { font-family: var(--mono); color: var(--faint); }
+.ref { color: var(--muted); font-size: 11.5px; margin: 0; }
+.ref b { color: var(--text); font-weight: 500; }
+
+#guide { position: fixed; inset: 0; background: rgba(8, 10, 12, .72); display: grid; place-items: center; z-index: 20; padding: 16px; }
+.g-box { background: var(--panel); border: 1px solid var(--line); max-width: 620px; width: 100%; max-height: 90vh; overflow: auto; padding: 16px 20px; }
+.g-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+.g-head b { font-size: 15px; font-weight: 600; }
+.g-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; color: var(--muted); max-width: 65ch; }
+.g-steps b { color: var(--text); font-weight: 500; }
+.g-note { color: var(--faint); margin: 12px 0 0; }
+#err { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); background: #3a1b1b; border: 1px solid var(--crit); color: var(--text); padding: 8px 12px; max-width: min(640px, 92vw); z-index: 30; font-family: var(--mono); font-size: 11.5px; }
+/* status bar */
+.status { grid-area: status; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 10px; background: var(--chrome); border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11px; color: var(--muted); min-width: 0; }
+.status span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* narrower screens: results dock moves under the viewport, page scrolls */
+@media (max-width: 1180px) {
+  html, body { height: auto; }
+  #app { height: auto; grid-template-columns: 280px minmax(0, 1fr); grid-template-rows: 38px 64vh auto 24px;
+    grid-template-areas: "top top" "left center" "left right" "status status"; }
+  .right { border-top: 1px solid var(--line); }
+  .left .scroll { max-height: none; }
+}
+@media (max-width: 760px) {
+  #app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 58vh auto auto 24px; grid-template-areas: "top" "center" "left" "right" "status"; }
+  .top { flex-wrap: wrap; padding: 6px 10px; gap: 8px; }
+  .cond { flex-basis: 100%; }
+  .left { border-right: 0; border-top: 1px solid var(--line); }
+  .mods { display: flex; overflow-x: auto; }
+  .mods a { grid-template-columns: auto; border-left: 0; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .mods a[aria-current="page"] { border-bottom-color: var(--accent); }
+  .mods .code, .mods .meth { display: none; }
+  .field.num { grid-template-columns: 96px minmax(0, 1fr) 56px 28px; }
+}
+</style>
+
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand">Slipstream<span>aero lab</span></div>
+    <div class="sep"></div>
+    <select id="project" aria-label="Project">
+      <option value="trainer">Light trainer</option>
+      <option value="glider">Sailplane</option>
+      <option value="turboprop">Regional turboprop</option>
+      <option value="airliner">Airliner on approach</option>
+      <option value="swept">Swept wing, no twist</option>
+      <option value="forward">Forward-swept wing</option>
+    </select>
+    <div class="crumb" id="crumb"></div>
+    <div class="spacer"></div>
+    <div class="cond" id="cond"></div>
+    <a class="btn" href="index.html" style="text-decoration:none">Explore view</a>
+    <button class="btn" id="guide-btn" type="button">Guide</button>
+  </header>
+
+  <aside class="left" aria-label="Modules and properties">
+    <nav aria-label="Modules">
+      <div class="dock-h">Modules</div>
+      <ul class="mods" id="mods">
+        <li><a href="#geometry"><span class="code">GEO</span>Geometry<span class="meth">edit</span></a></li>
+        <li><a href="#airfoil"><span class="code">2D</span>Airfoil<span class="meth">LBM</span></a></li>
+        <li><a href="#wing"><span class="code">VLM</span>Wing and tail<span class="meth">VLM</span></a></li>
+        <li><a href="#flight"><span class="code">FLT</span>Flight and icing<span class="meth">3-DOF</span></a></li>
+        <li><a href="#cfd3d"><span class="code">3D</span>3D flow<span class="meth">GPU</span></a></li>
+      </ul>
+    </nav>
+    <div class="dock-h"><span>Properties</span><span id="insp-note"></span></div>
+    <div class="scroll" id="inspector"></div>
+  </aside>
+
+  <main class="center">
+    <div class="vp-bar" id="vp-bar"></div>
+    <div class="vp" id="vp">
+      <canvas class="layer" id="cv-geometry" hidden></canvas>
+      <canvas class="layer" id="cv-wing" hidden></canvas>
+      <canvas class="layer" id="cv-airfoil" hidden></canvas>
+      <canvas class="layer" id="cv-flight" hidden></canvas>
+      <canvas class="layer" id="cv-cfd3d" hidden></canvas>
+      <div class="vp-empty" id="vp-empty" hidden><div><b id="vp-empty-t"></b><span id="vp-empty-m"></span></div></div>
+      <div class="vp-hud" id="vp-hud" hidden></div>
+      <div id="vp-legend" hidden><span class="t" id="vp-lt"></span><span id="vp-lmin"></span><canvas id="vp-cbar" width="150" height="8"></canvas><span id="vp-lmax"></span></div>
+      <div id="vp-toast" hidden></div>
+    </div>
+  </main>
+
+  <aside class="right" aria-label="Results">
+    <div class="dock-h"><span>Results</span><span id="res-note"></span></div>
+    <div class="scroll"><div class="res" id="results"></div></div>
+  </aside>
+
+  <footer class="status"><span id="st-left">Ready</span><span id="st-right"></span></footer>
+</div>
+
+
+<div id="guide" hidden role="dialog" aria-modal="true" aria-labelledby="guide-t">
+  <div class="g-box">
+    <div class="g-head"><b id="guide-t">How to use Slipstream</b><button class="btn" id="guide-x" type="button">Close</button></div>
+    <ol class="g-steps">
+      <li><b>Pick an aircraft.</b> Use the menu at the top left (Light trainer, Sailplane, Airliner…). Everything works on that one aircraft.</li>
+      <li><b>Choose a module</b> from the list on the left. The <b>Properties</b> under it are the inputs; the <b>Results</b> on the right update instantly.</li>
+      <li><b>Geometry</b>: drag a slider or type in a box (Span, Sweep, Taper…) and the 3D model changes. Drag the model to rotate it; scroll to zoom.</li>
+      <li><b>Wing and tail</b>: lift, drag, stall and stability of your design. Use the toolbar to colour the wing by loading or by stall margin, then press <b>Trim with tail incidence</b>.</li>
+      <li><b>Airfoil</b>: a live 2D airflow simulation around your wing section. It starts by itself; change the angle of attack, or switch on <b>Supercooled cloud</b> under Icing to grow ice.</li>
+      <li><b>Flight and icing</b>: flies your design. Switch on <b>In cloud</b>, or open <b>Scenarios</b> and choose “Hold in icing cloud”, then watch the event log.</li>
+      <li><b>3D flow</b>: 3D airflow on your graphics card. Needs Chrome or Edge 113+, or Safari 26. Drop an STL, OBJ or GLB file on it to test your own model.</li>
+    </ol>
+    <p class="g-note">The status bar at the bottom shows what the solver is doing. If something fails in your browser, the error appears there too.</p>
+  </div>
+</div>
+
+<script src="core.js?v=5"></script>
+<script src="geom.js?v=5"></script>
+<script src="vlm.js?v=5"></script>
+<script src="aero.js?v=5"></script>
+<script src="mod-geometry.js?v=5"></script>
+<script src="mod-airfoil.js?v=5"></script>
+<script src="mod-wing.js?v=5"></script>
+<script src="mod-flight.js?v=5"></script>
+<script src="mod-cfd3d.js?v=5"></script>
+<script src="shell.js?v=5"></script>
+
+</body>
+</html>

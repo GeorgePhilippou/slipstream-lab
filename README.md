@@ -1,6 +1,8 @@
 # Slipstream
 
-An aircraft design and aerodynamics workstation in the browser. One project aircraft is shared by five modules.
+Fly an aircraft and watch the air flow over it. `index.html` is the live explore view: the aircraft flies through sky and cloud, smoke streams follow the real vortex-lattice velocity field (upwash, downwash, wingtip vortices), the wing glows where it is near stall, a live 2D lattice-Boltzmann cross-section shows separation and ice, and six guided experiments (lift, stall, wingtip vortices, swept wings, icing, winglets) play out with narration.
+
+`lab.html` is the engineering workstation with the full numbers. One project aircraft is shared by five modules.
 
 **Run it:** open `index.html` through any web server (for example `python3 -m http.server`), or publish this folder with GitHub Pages. Opening the file directly from disk will not work, because browsers block Web Workers and file loading on `file://` pages.
 
@@ -18,6 +20,7 @@ Colour maps: viridis (magnitude) and cool-warm (signed quantities).
 ## Model sources
 | File | Source |
 |---|---|
+| `vendor/three-0.149.0.min.js` | three.js r149 (MIT licence, see `vendor/three-LICENSE.txt`) |
 | `models/nasa-crm.slm` | NASA Common Research Model (NASA Langley), DPW-4 wing-body-tail surface distributed with the DAFoam tutorials; decimated |
 | `models/onera-m6.slm` | ONERA M6 wing surface from the SU2 project validation mesh |
 | `models/nasa-x57.slm` | NASA X-57 Maxwell, NASA 3D Resources (public domain); decimated |
