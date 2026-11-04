@@ -1,6 +1,10 @@
 // Slipstream: core utilities, project model, module framework and inspector builder.
 (() => {
 const SL = window.SL = {};
+// surface any failure instead of failing silently
+const showErr = msg => { let e = document.getElementById('err'); if (!e) { e = document.createElement('div'); e.id = 'err'; e.setAttribute('role', 'alert'); document.body.appendChild(e); } e.textContent = 'Error: ' + msg + ' (open the Guide, or reload the page with Ctrl/Cmd+Shift+R)'; const s = document.getElementById('st-left'); if (s) s.textContent = 'Error: ' + msg; };
+addEventListener('error', e => showErr(e.target && e.target !== window && (e.target.src || e.target.href) ? 'could not load ' + (e.target.src || e.target.href) : (e.message || 'unknown error')), true);
+addEventListener('unhandledrejection', e => showErr((e.reason && e.reason.message) || String(e.reason)));
 const $ = SL.$ = id => document.getElementById(id);
 const clamp = SL.clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 SL.D2R = Math.PI / 180;

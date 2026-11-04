@@ -152,6 +152,14 @@ dd.ok, .ok { color: var(--ok); } dd.warn, .warn { color: var(--warn); } dd.crit,
 .ref { color: var(--muted); font-size: 11.5px; margin: 0; }
 .ref b { color: var(--text); font-weight: 500; }
 
+#guide { position: fixed; inset: 0; background: rgba(8, 10, 12, .72); display: grid; place-items: center; z-index: 20; padding: 16px; }
+.g-box { background: var(--panel); border: 1px solid var(--line); max-width: 620px; width: 100%; max-height: 90vh; overflow: auto; padding: 16px 20px; }
+.g-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+.g-head b { font-size: 15px; font-weight: 600; }
+.g-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; color: var(--muted); max-width: 65ch; }
+.g-steps b { color: var(--text); font-weight: 500; }
+.g-note { color: var(--faint); margin: 12px 0 0; }
+#err { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); background: #3a1b1b; border: 1px solid var(--crit); color: var(--text); padding: 8px 12px; max-width: min(640px, 92vw); z-index: 30; font-family: var(--mono); font-size: 11.5px; }
 /* status bar */
 .status { grid-area: status; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 10px; background: var(--chrome); border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11px; color: var(--muted); min-width: 0; }
 .status span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -194,6 +202,7 @@ dd.ok, .ok { color: var(--ok); } dd.warn, .warn { color: var(--warn); } dd.crit,
     <div class="crumb" id="crumb"></div>
     <div class="spacer"></div>
     <div class="cond" id="cond"></div>
+    <button class="btn" id="guide-btn" type="button">Guide</button>
   </header>
 
   <aside class="left" aria-label="Modules and properties">
@@ -234,16 +243,33 @@ dd.ok, .ok { color: var(--ok); } dd.warn, .warn { color: var(--warn); } dd.crit,
   <footer class="status"><span id="st-left">Ready</span><span id="st-right"></span></footer>
 </div>
 
-<script src="core.js"></script>
-<script src="geom.js"></script>
-<script src="vlm.js"></script>
-<script src="aero.js"></script>
-<script src="mod-geometry.js"></script>
-<script src="mod-airfoil.js"></script>
-<script src="mod-wing.js"></script>
-<script src="mod-flight.js"></script>
-<script src="mod-cfd3d.js"></script>
-<script src="shell.js"></script>
+
+<div id="guide" hidden role="dialog" aria-modal="true" aria-labelledby="guide-t">
+  <div class="g-box">
+    <div class="g-head"><b id="guide-t">How to use Slipstream</b><button class="btn" id="guide-x" type="button">Close</button></div>
+    <ol class="g-steps">
+      <li><b>Pick an aircraft.</b> Use the menu at the top left (Light trainer, Sailplane, Airliner…). Everything works on that one aircraft.</li>
+      <li><b>Choose a module</b> from the list on the left. The <b>Properties</b> under it are the inputs; the <b>Results</b> on the right update instantly.</li>
+      <li><b>Geometry</b>: drag a slider or type in a box (Span, Sweep, Taper…) and the 3D model changes. Drag the model to rotate it; scroll to zoom.</li>
+      <li><b>Wing and tail</b>: lift, drag, stall and stability of your design. Use the toolbar to colour the wing by loading or by stall margin, then press <b>Trim with tail incidence</b>.</li>
+      <li><b>Airfoil</b>: a live 2D airflow simulation around your wing section. It starts by itself; change the angle of attack, or switch on <b>Supercooled cloud</b> under Icing to grow ice.</li>
+      <li><b>Flight and icing</b>: flies your design. Switch on <b>In cloud</b>, or open <b>Scenarios</b> and choose “Hold in icing cloud”, then watch the event log.</li>
+      <li><b>3D flow</b>: 3D airflow on your graphics card. Needs Chrome or Edge 113+, or Safari 26. Drop an STL, OBJ or GLB file on it to test your own model.</li>
+    </ol>
+    <p class="g-note">The status bar at the bottom shows what the solver is doing. If something fails in your browser, the error appears there too.</p>
+  </div>
+</div>
+
+<script src="core.js?v=5"></script>
+<script src="geom.js?v=5"></script>
+<script src="vlm.js?v=5"></script>
+<script src="aero.js?v=5"></script>
+<script src="mod-geometry.js?v=5"></script>
+<script src="mod-airfoil.js?v=5"></script>
+<script src="mod-wing.js?v=5"></script>
+<script src="mod-flight.js?v=5"></script>
+<script src="mod-cfd3d.js?v=5"></script>
+<script src="shell.js?v=5"></script>
 
 </body>
 </html>

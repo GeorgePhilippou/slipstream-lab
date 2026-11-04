@@ -351,7 +351,7 @@ const MODELS = {
   gh: { file: 'models/nasa-global-hawk.slm', name: 'NASA Global Hawk', info: 'NASA\'s high-altitude Earth-science UAV.', facts: 'Span 39.9 m, length 14.5 m. Reference area estimated from the voxel planform; gear down.', credit: 'NASA 3D Resources (public domain).' },
 };
 const meshCache = {}; let custom = null, projectMeshV = -1;
-const mw = new Worker('mesh-worker.js');
+const mw = new Worker('mesh-worker.js?v=5');
 let ridN = 0; const rpcWait = {};
 mw.onmessage = e => { const m = e.data, w = rpcWait[m.rid]; if (!w) return; delete rpcWait[m.rid]; m.type === 'error' ? w.rej(new Error(m.message)) : w.res(m); };
 const rpc = (msg, tr = []) => new Promise((res, rej) => { const rid = ++ridN; rpcWait[rid] = { res, rej }; mw.postMessage({ ...msg, rid }, tr); });

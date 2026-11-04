@@ -226,7 +226,7 @@ SL.register('airfoil', {
   },
   activate() {
     active = true; legend();
-    if (!worker) { worker = new Worker('wing-worker.js'); worker.onmessage = onMsg; }
+    if (!worker) { worker = new Worker('wing-worker.js?v=5'); worker.onmessage = onMsg; }
     if (!started) { started = true; start(); } else { sendGeom(); worker.postMessage({ type: 'run', running: S.running }); worker.postMessage({ type: 'frame' }); }
     requestAnimationFrame(tick);
   },

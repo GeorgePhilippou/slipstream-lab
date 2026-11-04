@@ -32,4 +32,11 @@ SL.on('project', d => {
   const m = SL.modules[cur]; if (m && m.onProject) m.onProject(d);
 });
 cond(); route();
+// guide: shown on first visit, reopened from the top bar
+const g = $('guide'), openG = () => { g.hidden = false; $('guide-x').focus(); }, closeG = () => { g.hidden = true; try { localStorage.setItem('slipstream-guide', '1'); } catch (e) {} };
+$('guide-btn').onclick = openG; $('guide-x').onclick = closeG;
+g.addEventListener('click', e => { if (e.target === g) closeG(); });
+addEventListener('keydown', e => { if (e.key === 'Escape' && !g.hidden) closeG(); });
+let seen = false; try { seen = localStorage.getItem('slipstream-guide') === '1'; } catch (e) {}
+if (!seen) openG();
 })();
