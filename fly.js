@@ -5,8 +5,8 @@
 // snow and frost contamination; D2Q9 lattice Boltzmann for the live wing section (wing-worker.js).
 (() => {
 const { $, fmt, int, clamp, D2R } = SL;
-const G0 = 9.80665, VER = 11;   // VER busts browser caches of the model files
-const S = { key: 'c172', mode: 'fly', aoa: 4, view: 'chase', wx: 'clear', dT: 0, ts: 1, smoke: false, trails: true, liftmap: false, icehl: false, engine: true, aoaHold: false };
+const G0 = 9.80665, VER = 12;   // VER busts browser caches of the model files
+const S = { key: 'c172', mode: 'fly', aoa: 4, view: 'chase', wx: 'clear', dT: 0, ts: 1, smoke: false, trails: true, liftmap: false, icehl: false, engine: true, aoaHold: false, thr: 0.7, bank: 0 };   // aoaHold = manual piloting
 const WX = {
   clear: { name: 'Clear', lwc: 0, mvd: 0, precip: null },
   cloud: { name: 'Icing cloud', lwc: 0.5, mvd: 22, precip: 'cloud' },
@@ -22,30 +22,53 @@ const OAT = h => SL.isa(h).Tc + S.dT;
 const hNow = () => S.mode === 'park' ? 0 : st.h;   // parked aircraft sit at sea level
 
 // ====================================================== flight model (ISA, point mass, icing and contamination)
+// Maximum lift falls with Mach number (compressibility: shock-induced separation, much later on swept wings) and
+// rises slowly with Reynolds number, so the stall angle is not fixed: it is lower at high Mach and when slow and high.
+function clmaxFactor() {
+  const h = st ? Math.max(0, st.h) : 0, V = st ? Math.max(30, st.V) : 50, atm = SL.isa(h), M = V / atm.a, Re = atm.rho * V * ac.c / atm.mu;
+  const fRe = clamp(Math.pow(Re / ac.Re0, 0.08), 0.85, 1.08), fM = M < 0.3 ? 1 : Math.max(0.4, 1 - (ac.swept ? 1.1 : 1.6) * Math.pow(M - 0.3, 1.6));
+  return { f: fRe * fM, fRe, fM, M, Re };
+}
 function aeroOf(k, kind, c) {
   const AR = ac.b * ac.b / ac.S, kc = k / ac.c, s = Math.sqrt(Math.max(0, kc)), hf = kind === 'glaze' ? 1 : kind === 'mixed' ? 0.82 : 0.65;
-  const dCLmax = Math.min(0.6, 3.0 * s * hf + 0.3 * c), dCD0 = 0.25 * s * hf + 0.4 * c * ac.CD0, a2d = ac.a0 * (1 - 0.5 * s), aw = a2d / (1 + a2d / (Math.PI * ac.e * AR));
-  const CLmax = ac.CLmax * (1 - dCLmax);
-  return { AR, aw, CLmax, alphaS: ac.alpha0 + 1.1 * CLmax / aw, dCD0, dCLmax, kc };
+  const dCLmax = Math.min(0.6, 3.0 * s * hf + 0.3 * c), dCD0 = 0.25 * s * hf + 0.4 * c * ac.CD0, a2d = ac.a0 * (1 - 0.5 * s), aw = a2d / (1 + a2d / (Math.PI * ac.eL * AR));
+  const CLmax = ac.CLmax * clmaxFactor().f * (1 - dCLmax);
+  return { AR, aw, CLmax, alphaS: ac.alpha0 + 1.05 * CLmax / aw, dCD0, dCLmax, kc };
 }
-const CLof = (al, X) => { const x = (al - ac.alpha0) * X.aw / X.CLmax; return (x < 0.9 ? x : x < 1.1 ? x - (x - 0.9) ** 2 / 0.4 : Math.max(0.55, 1 - 0.9 * (x - 1.1))) * X.CLmax; };   // lift rounds over to CLmax, then falls after the stall
-const CDof = (CL, al, M, X) => { const x = (al - ac.alpha0) * X.aw / X.CLmax; return ac.CD0 + X.dCD0 + (S.engine ? 0 : ac.wm) + CL * CL / (Math.PI * ac.e * X.AR) + (x > 1.1 ? 0.6 * (x - 1.1) : 0) + (M > ac.Mcrit ? 20 * (M - ac.Mcrit) ** 4 : 0); };
-const Tmax = (rho, V, M) => { if (!S.engine) return 0; const sig = rho / 1.225; return ac.prop ? Math.min(ac.Tstatic * sig, ac.eta * ac.P * sig / Math.max(V, 20)) : ac.T0 * sig ** 0.85 * (1 - 0.25 * M); };
+const CLof = (al, X) => { const x = (al - ac.alpha0) * X.aw / X.CLmax; return (x < 0.95 ? x : x < 1.05 ? x - (x - 0.95) ** 2 / 0.2 : Math.max(0.55, 1 - 0.9 * (x - 1.05))) * X.CLmax; };   // lift rounds over to CLmax, then falls after the stall
+const CDof = (CL, al, M, X) => { const x = (al - ac.alpha0) * X.aw / X.CLmax; return ac.CD0 + X.dCD0 + (S.engine ? 0 : ac.wm * (st.rpm > 1 ? 1 : 0.5)) + CL * CL / (Math.PI * ac.e * X.AR) + (x > 1.05 ? 0.6 * (x - 1.05) : 0) + (M > ac.Mcrit ? 20 * (M - ac.Mcrit) ** 4 : 0); };
+const Tmax = (rho, V, M) => { if (!S.engine) return 0;   // full-throttle thrust
+  const sig = rho / 1.225; return ac.prop ? Math.min(ac.Tstatic * sig, ac.eta * ac.P * sig / Math.max(V, 20)) : ac.T0 * sig ** 0.85 * (1 - 0.25 * M); };
 const beta0 = V => { const w = WX[S.wx]; if (!w.mvd) return 0; const d = w.mvd * 1e-6, K = 1000 * d * d * Math.max(V, 1) / (9 * 1.7e-5 * 0.2 * ac.c); if (K <= 0.125) return 0; const z = 1.4 * Math.pow(K - 0.125, 0.84); return 0.85 * z / (1 + z); };
 const liquid = Tc => Tc >= 0 ? 0 : clamp((Tc + 40) / 25, 0, 1);
 const liquidFor = (wx, Tc) => wx === 'frz' ? (Tc < 0 && Tc > -12 ? 1 : 0) : WX[wx].lwc ? liquid(Tc) : 0;
 const iceRate = () => { const w = WX[S.wx], Tc = OAT(hNow()), lf = liquidFor(S.wx, Tc); if (lf <= 0 || st.V < 5 || S.mode === 'park') return 0;
   const kd = SL.iceKind(Tc, w.lwc).key, kind = kd === 'none' ? 'rime' : (S.wx === 'frz' ? 'glaze' : kd); return beta0(st.V) * w.lwc * 1e-3 * st.V / (kind === 'rime' ? 880 : 917) * lf; };   // m/s of sim time
 function newState() {
-  st = { h: AP.ht, V: AP.vt, gam: 0, alpha: 3 * D2R, k: 0, kind: 'rime', t: 0, mode: 'hold', recT: 0, stallH: 0, contam: 0, cType: 'snow', dk: 0, dist: 0, gl: null, deiceT: -1e9 };
+  st = { h: AP.ht, V: AP.vt, gam: 0, alpha: 3 * D2R, k: 0, kind: 'rime', t: 0, mode: 'hold', recT: 0, stallH: 0, contam: 0, cType: 'snow', dk: 0, dist: 0, gl: null, deiceT: -1e9, theta: 0, q: 0, de: 0, gdot: 0, phi: 0, psi: 0, X: 0, Z: 0, thr: 0.6, rpm: 0 };
   const atm = SL.isa(st.h), X = aeroOf(0, 'rime', 0), q = 0.5 * atm.rho * st.V * st.V;
-  st.alpha = clamp(ac.alpha0 + ac.m * G0 / (q * ac.S) / X.aw, -4 * D2R, 14 * D2R);
+  st.alpha = clamp(ac.alpha0 + ac.m * G0 / (q * ac.S) / X.aw, -4 * D2R, 14 * D2R); st.theta = st.alpha;
+  st.de = clamp(-(ac.Cm0 + ac.Cma * st.alpha) / ac.Cmde, -25 * D2R, 15 * D2R); st.rpm = ac.E.n1 ? 80 : 0.85 * ac.E.max;
 }
 // Whole-aircraft drag and span efficiency: typical published values (the component build-up in aero.js omits
 // struts, gear, cooling and interference drag, which matter most for gliding). wm: extra drag of a windmilling
 // propeller or fan once the engine is off.
-const DRAG = { c172: { CD0: 0.035, e: 0.6, wm: 0.004 }, spitfire: { CD0: 0.0215, e: 0.78, wm: 0.004 }, b738: { CD0: 0.0205, e: 0.8, wm: 0.0012 }, a320: { CD0: 0.02, e: 0.8, wm: 0.0012 } };
-function rebuildAircraft() { ac = SL.aircraftFromProject(); const d = DRAG[S.key]; if (d) Object.assign(ac, d); else ac.wm = 0.003; acVer = SL.version; A = SL.aero(); }
+// CLmax: clean maximum lift from published stall speeds (C172 48 kt at 1,043 kg; Spitfire IX about 82 kt; 737/A320 about 145 kt at 65 t).
+const DRAG = { c172: { CD0: 0.035, e: 0.6, wm: 0.004, CLmax: 1.6 }, spitfire: { CD0: 0.0215, e: 0.78, wm: 0.004, CLmax: 1.36 }, b738: { CD0: 0.0205, e: 0.8, wm: 0.0012, CLmax: 1.5 }, a320: { CD0: 0.02, e: 0.8, wm: 0.0012, CLmax: 1.5 } };
+// Engines: propeller rpm range and diameter (windmilling), or fan N1 for jets
+const ENG = { c172: { max: 2700, idle: 750, D: 1.9 }, spitfire: { max: 1430, idle: 330, D: 3.27 }, b738: { n1: true }, a320: { n1: true } };
+function rebuildAircraft() {
+  ac = SL.aircraftFromProject(); ac.eL = clamp(ac.e, 0.85, 1); const d = DRAG[S.key];   // eL: span efficiency of the lift slope; e (below): Oswald factor for drag
+  if (d) Object.assign(ac, d); else ac.wm = 0.003; acVer = SL.version; A = SL.aero();
+  // longitudinal stability and control from the vortex-lattice solve (wing + tail about the CG), plus the fuselage
+  const P = SL.P, ref = A.ref, f0 = SL.isa(P.flight.h);
+  const volF = 0.6 * Math.PI / 4 * P.body.df ** 2 * P.body.lf, Cma_f = 2 * 0.9 * volF / (ref.S * ref.cbar);      // Munk: fuselage is destabilising
+  const lt = P.tail.lt + 0.25 * P.tail.ct - ref.xcg;
+  Object.assign(ac, { Re0: f0.rho * P.flight.V * ac.c / f0.mu, swept: P.wing.sweep > 15,
+    Cm0: A.Cm0, Cma: clamp(A.Cma + Cma_f, -0.25 * A.CLa, -0.05 * A.CLa), Cmde: 0.5 * A.Cmit, CLde: 0.5 * A.CLit, Cmq: 2.4 * A.Cmit * lt / ref.cbar,
+    Iyy: ac.m * (0.16 * P.body.lf) ** 2, wn: ac.m < 10000 ? 2.4 : 1.3, pmax: ac.m > 20000 ? 0.26 : S.key === 'spitfire' ? 1.4 : 0.7, E: ENG[S.key] || { max: 2500, idle: 700, D: 2 } });
+  ac.SM = -ac.Cma / A.CLa;
+}
 // best glide: maximum lift-to-drag ratio of the whole aircraft, L/D max = ½·√(π·e·AR / CD0)
 function glide(X, h = st.h, engineOff = true) {
   const cd0 = ac.CD0 + X.dCD0 + (engineOff ? ac.wm : 0), k = 1 / (Math.PI * ac.e * X.AR), CL = Math.min(Math.sqrt(cd0 / k), 0.85 * X.CLmax), LD = CL / (cd0 + k * CL * CL);
@@ -59,33 +82,62 @@ function accrete(dt) {   // stagnation-line ice growth (m), shared by the flight
   st.k += d; st.dk += d;
 }
 function flightStep(dt) {
-  const atm = SL.isa(st.h), X = aeroOf(st.k, st.kind, st.contam), W = ac.m * G0, q = 0.5 * atm.rho * st.V * st.V, M = st.V / atm.a, Tm = Tmax(atm.rho, st.V, M);
-  let alCmd;
-  if (S.aoaHold) alCmd = S.aoa * D2R;   // pilot holds the wing angle; the throttle still tries to hold the speed
-  else if (st.mode === 'recover') alCmd = ac.alpha0 + 0.7 * (X.alphaS - ac.alpha0);
+  const atm = SL.isa(st.h), X = aeroOf(st.k, st.kind, st.contam), W = ac.m * G0, m = ac.m, V = st.V, q = 0.5 * atm.rho * V * V, M = V / atm.a, Tm = Tmax(atm.rho, V, M);
+  const manual = S.aoaHold, recovering = st.mode === 'recover' && !manual;
+  // --- guidance: the wing angle the pilot or the autopilot wants
+  let alC;
+  if (manual) alC = S.aoa * D2R;
+  else if (recovering) alC = ac.alpha0 + 0.7 * (X.alphaS - ac.alpha0);
   else {
     const CLl = W / (q * ac.S), D0 = q * ac.S * CDof(CLl, ac.alpha0 + CLl / X.aw, M, X), gmax = Math.max(0, (Tm - D0) / W * 0.7);
     let gc = clamp(0.002 * (AP.ht - st.h), -0.08, 0.08); if (gc > 0) gc = Math.min(gc, gmax);
     if (!S.engine) { const g = glide(X); gc = clamp(-1 / g.LD + 1.2 * (st.V - g.V) / g.V, -0.5, 0.15); }   // glide at best-glide speed
-    alCmd = ac.alpha0 + (W * Math.cos(st.gam) + ac.m * st.V * 0.8 * (gc - st.gam)) / (q * ac.S) / X.aw;
+    const Lc = clamp(W * Math.cos(st.gam) / Math.max(0.3, Math.cos(st.phi)) + m * V * 0.8 * (gc - st.gam), 0.4 * W, 1.8 * W);   // autopilot keeps within 0.4–1.8 g
+    alC = ac.alpha0 + Lc / (q * ac.S) / X.aw;
   }
-  st.alpha += (clamp(alCmd, -6 * D2R, 24 * D2R) - st.alpha) * Math.min(1, dt * 2.5);
-  const CL = CLof(st.alpha, X), CD = CDof(CL, st.alpha, M, X), L = q * ac.S * CL, D = q * ac.S * CD;
-  const T = clamp(st.mode === 'recover' ? Tm : D + W * Math.sin(st.gam) + ac.m * 0.25 * (AP.vt - st.V), 0, Tm);
-  st.V = Math.max(12, st.V + (T - D - W * Math.sin(st.gam)) / ac.m * dt);
-  st.gam = clamp(st.gam + (L - W * Math.cos(st.gam)) / (ac.m * st.V) * dt, -0.6, 0.4);
-  st.h += st.V * Math.sin(st.gam) * dt; st.dist += st.V * Math.cos(st.gam) * dt; st.t += dt;
+  alC = clamp(alC, -8 * D2R, 28 * D2R);
+  // --- throttle (engines take time to spool up)
+  let thrC = !S.engine ? 0 : manual ? S.thr : recovering ? 1 : 0;
+  if (S.engine && !manual && !recovering) { const CL = CLof(st.alpha, X), D = q * ac.S * CDof(CL, st.alpha, M, X); thrC = clamp((D + W * Math.sin(st.gam) + m * 0.25 * (AP.vt - V)) / Math.max(1, Tm), 0, 1); }
+  st.thr += (thrC - st.thr) * Math.min(1, dt / (ac.prop ? 0.7 : 3));
+  // --- elevator: a pitch controller drives the wing angle towards the command, within the elevator's travel
+  const qSc = q * ac.S * ac.c, adot = st.q - st.gdot, wn = ac.wn;
+  const xs = (st.alpha - ac.alpha0) * X.aw / X.CLmax, CmBreak = xs > 1.02 ? -0.25 * Math.min(0.8, xs - 1.02) : 0;   // stalled wing: less downwash, nose drops
+  const CmNoE = ac.Cm0 + ac.Cma * st.alpha + ac.Cmq * st.q * ac.c / (2 * V) + CmBreak;
+  const deC = clamp((ac.Iyy * (wn * wn * (alC - st.alpha) - 1.7 * wn * adot) / qSc - CmNoE) / ac.Cmde, -25 * D2R, 15 * D2R);
+  st.de += clamp(deC - st.de, -0.9 * dt, 0.9 * dt);
+  // --- forces and moments
+  const CL = CLof(st.alpha, X) + ac.CLde * st.de, CD = CDof(CL, st.alpha, M, X), L = q * ac.S * CL, D = q * ac.S * CD, T = st.thr * Tm;
+  const Cm = CmNoE + ac.Cmde * st.de;
+  const Vd = (T * Math.cos(st.alpha) - D - W * Math.sin(st.gam)) / m, gd = (L * Math.cos(st.phi) + T * Math.sin(st.alpha) - W * Math.cos(st.gam)) / (m * V), qd = qSc * Cm / ac.Iyy;
+  st.V = Math.max(12, V + Vd * dt); st.gam = clamp(st.gam + gd * dt, -1.45, 1.45); st.gdot = gd;
+  st.q += qd * dt; st.theta += st.q * dt; st.alpha = st.theta - st.gam;
+  // --- bank and turn: rolling is rate-limited; the horizontal part of the lift turns the aircraft
+  const phC = (recovering ? 0 : S.bank) * D2R; st.phi += clamp(phC - st.phi, -ac.pmax * dt, ac.pmax * dt);
+  st.psi += L * Math.sin(st.phi) / (m * V * Math.max(0.2, Math.cos(st.gam))) * dt;
+  const hs = st.V * Math.cos(st.gam) * dt; st.X += hs * Math.cos(st.psi); st.Z += hs * Math.sin(st.psi);
+  st.h += st.V * Math.sin(st.gam) * dt; st.dist += hs; st.t += dt;
   if (st.h <= 0 && !S.engine) { touchDown(); return; }
-  if (st.h < 30) { st.h = 30; st.gam = Math.max(0, st.gam); }
+  if (st.h < 30) { st.h = 30; if (st.gam < 0) { st.gam = 0; st.theta = st.alpha; } }
+  // --- stall
   const Vs = Math.sqrt(2 * W / (atm.rho * ac.S * X.CLmax));
-  if (S.aoaHold) { if (st.alpha > X.alphaS && !st.stallTold) { st.stallTold = true; toast(`Stalled at ${fmt(st.alpha / D2R, 1)}°: the air has separated from the top of the wing and lift collapses. Lower the wing angle, or press Auto.`, 6000); } if (st.alpha < X.alphaS - 1 * D2R) st.stallTold = false; }
-  else if (st.mode === 'hold' && st.alpha > X.alphaS) { st.mode = 'recover'; st.stallH = st.h; st.recT = 0; toast(`Stall at ${int(st.h)} m${st.k > 0.002 ? ` with ${Math.round(st.k * 1000)} mm of ice` : st.contam > 0.2 ? ' with a contaminated wing' : ''}. The nose drops to recover.`, 5500); }
+  if (manual) { if (st.alpha > X.alphaS && !st.stallTold) { st.stallTold = true; toast(`Stalled at ${fmt(st.alpha / D2R, 1)}° (the stall angle here is ${fmt(X.alphaS / D2R, 1)}°): the air has separated from the top of the wing and lift collapses. Lower the wing angle, or switch to Autopilot.`, 6500); } if (st.alpha < X.alphaS - 1 * D2R) st.stallTold = false; }
+  else if (st.mode === 'hold' && st.alpha > X.alphaS) { st.mode = 'recover'; st.stallH = st.h; st.recT = 0; toast(`Stall at ${int(st.h)} m and ${fmt(st.alpha / D2R, 1)}°${st.k > 0.002 ? ` with ${Math.round(st.k * 1000)} mm of ice` : st.contam > 0.2 ? ' with a contaminated wing' : Math.abs(st.phi) > 0.3 ? ` in a ${Math.round(Math.abs(st.phi) / D2R)}° bank (load ${fmt(L / W, 1)} g)` : ''}. The autopilot levels the wings and lowers the nose.`, 6000); }
   if (st.mode === 'recover') { st.recT += dt; if (st.recT > 4 && st.V > 1.3 * Vs && st.alpha < X.alphaS) { st.mode = 'hold'; AP.ht = Math.round(st.h / 100) * 100; syncControls(); toast(`Recovered, ${int(st.stallH - st.h)} m lower.`); } }
   accrete(dt);
 }
+// propeller rpm (or fan N1): set by the throttle; with the engine off the airflow keeps it windmilling until slow
+function engineStep(dt) {
+  const E = ac.E, run = S.mode !== 'park'; let tgt;
+  if (E.n1) tgt = S.engine && run ? 22 + 78 * st.thr : run ? Math.min(30, 3 + 10 * st.V / 130) : 0;
+  else if (S.engine && run) tgt = E.idle + (E.max - E.idle) * st.thr;
+  else { const Vs = O.Vs || 30; tgt = run && st.V > 0.95 * Vs ? Math.min(0.75 * E.max, 60 * st.V / (1.05 * E.D)) : 0; }
+  st.rpm += (tgt - st.rpm) * Math.min(1, dt / (E.n1 ? 3 : tgt < st.rpm ? 2.5 : 1));
+  if (st.rpm < 3) st.rpm = tgt < 3 ? 0 : st.rpm;
+}
 function setEngine(on) {
   S.engine = on;
-  if (!on) { st.gl = { h0: st.h, d0: st.dist, t0: st.t }; S.aoaHold = false; const g = glide(aeroOf(st.k, st.kind, st.contam)); toast(`Engine off. The autopilot holds best-glide speed, ${kt(g.V)} kt: lift ÷ drag is at its best, ${fmt(g.LD, 1)} : 1, so from ${int(st.h)} m it can glide about ${fmt(st.h * g.LD / 1000, 1)} km.`, 7000); }
+  if (!on) { st.gl = { h0: st.h, d0: st.dist, t0: st.t }; S.aoaHold = false; const g = glide(aeroOf(st.k, st.kind, st.contam)); toast(`Engine off. The autopilot holds best-glide speed, ${kt(g.V)} kt, where lift ÷ drag is best (${fmt(g.LD, 1)} : 1): from ${int(st.h)} m it can glide about ${fmt(st.h * g.LD / 1000, 1)} km. ${ac.E.n1 ? 'The fans keep windmilling slowly in the airflow.' : 'The propeller keeps turning because the airflow drives it (windmilling), which adds drag. It stops only if you slow down close to the stall.'}`, 9000); }
   else { st.gl = null; AP.ht = Math.max(300, Math.round(st.h / 100) * 100); }
   syncControls();
 }
@@ -97,7 +149,7 @@ function touchDown() {
 function outputs() {
   const atm = SL.isa(st.h), X = aeroOf(st.k, st.kind, st.contam), W = ac.m * G0, q = 0.5 * atm.rho * st.V * st.V, M = st.V / atm.a;
   const CL = CLof(st.alpha, X), CD = CDof(CL, st.alpha, M, X);
-  O = { atm, X, W, q, M, CL, CD, L: q * ac.S * CL, D: q * ac.S * CD, Vs: Math.sqrt(2 * W / (atm.rho * ac.S * X.CLmax)), vs: st.V * Math.sin(st.gam), stalled: S.mode !== 'park' && (st.alpha > X.alphaS || st.mode === 'recover') };
+  O = { atm, X, W, q, M, CL, CD, n: S.mode === 'fly' ? q * ac.S * CL / W : S.mode === 'tunnel' ? q * ac.S * CL / W : 1, L: q * ac.S * CL, D: q * ac.S * CD, Vs: Math.sqrt(2 * W / (atm.rho * ac.S * X.CLmax)), vs: st.V * Math.sin(st.gam), stalled: S.mode !== 'park' && (st.alpha > X.alphaS || st.mode === 'recover') };
 }
 
 // ====================================================== renderer, sky, environment
@@ -215,6 +267,8 @@ function buildModel(M) {
     for (const cl of clusters) {
       const g = mk(cl, false); g.computeBoundingBox(); const c = new THREE.Vector3(); g.boundingBox.getCenter(c); g.translate(0, -c.y, -c.z);
       const holder = new THREE.Group(); holder.position.set(0, c.y, c.z); const mP = new THREE.Mesh(g, propMat); holder.add(mP); body.add(holder); meshes.push(mP); props.push(holder);
+      if (CAT[S.key].engine.type === 'prop') { const r = Math.max(g.boundingBox.max.y - c.y, g.boundingBox.max.z - c.z), dg = new THREE.CircleGeometry(r * 0.98, 48); dg.rotateY(Math.PI / 2);
+        const disc = new THREE.Mesh(dg, new THREE.MeshBasicMaterial({ color: 0x0c0f13, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide })); disc.position.x = (g.boundingBox.min.x + g.boundingBox.max.x) / 2; holder.add(disc); meshes.push(disc); holder.userData.disc = disc; }
     }
     gP.dispose();
   }
@@ -300,7 +354,7 @@ function liftMap(off) {
 
 // ====================================================== flow field, wingtip-vortex trails and smoke
 let field = null, fieldBusy = false, fieldWant = null, fieldAlpha = 99, fieldVer = -1, box = null;
-const fw = new Worker('field-worker.js?v=11');
+const fw = new Worker('field-worker.js?v=12');
 fw.onmessage = e => { field = e.data; fieldBusy = false; buildTrails(); if (fieldWant) { const w = fieldWant; fieldWant = null; requestField(w.alpha); } };
 function requestField(alpha) {
   if (!A) return;
@@ -487,7 +541,8 @@ canvas.addEventListener('pointerup', () => drag = null); canvas.addEventListener
 canvas.addEventListener('wheel', e => { e.preventDefault(); cam.zoom = clamp(cam.zoom * Math.exp(e.deltaY * 0.001), 0.25, 3); }, { passive: false });
 function setView(v) { S.view = v; cam.yaw = 0; cam.pitch = 0; cam.zoom = 1; document.querySelectorAll('#views button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === v))); }
 function updateCamera(dt) {
-  const [p, t] = PRESET[S.view](L_ref), off = p.clone().sub(t);
+  const [p, t] = PRESET[S.view](L_ref), yq = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), S.mode === 'fly' ? -st.psi : 0);
+  p.applyQuaternion(yq); t.applyQuaternion(yq); const off = p.clone().sub(t);
   const sph = new THREE.Spherical().setFromVector3(off); sph.radius *= cam.zoom; sph.theta += cam.yaw; sph.phi = clamp(sph.phi - cam.pitch, 0.05, Math.PI - 0.05);
   const want = new THREE.Vector3().setFromSpherical(sph).add(t);
   if (S.mode === 'park') want.y = Math.max(want.y, groundY + 1.2);
@@ -498,11 +553,11 @@ function updateCamera(dt) {
 function resize() { const w = canvas.clientWidth, h = canvas.clientHeight; if (!w || !h) return; if (canvas.width !== Math.round(w * R.getPixelRatio())) { R.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); } }
 
 // ====================================================== world
-let travel = 0, groundY = -1, lastEnvH = -1e9;
+let travel = 0, groundY = -1, lastEnvH = -1e9, wX = 0, wZ = 0;
 function updateWorld(dt) {
   const park = S.mode === 'park', h = park ? 0 : st.h, V = park ? 0 : st.V, g = S.mode === 'fly' ? st.gam : 0;
-  const th = S.mode === 'fly' ? st.alpha + st.gam : S.mode === 'tunnel' ? st.alpha : 0;
-  plane.rotation.z = th;
+  const fly = S.mode === 'fly', th = fly ? st.theta : S.mode === 'tunnel' ? st.alpha : 0;
+  plane.rotation.order = 'YZX'; plane.rotation.set(fly ? st.phi : 0, fly ? -st.psi : 0, th);   // roll, yaw (heading), pitch
   const f = clamp(h / 12000, 0, 1), over = S.wx === 'clear' || S.wx === 'frost' ? 0 : S.wx === 'cloud' ? 0.85 : 0.7;
   skyU.top.value.setRGB(0.16 - 0.1 * f, 0.43 - 0.25 * f, 0.75 - 0.3 * f); skyU.hor.value.setRGB(0.81 - 0.2 * f, 0.89 - 0.15 * f, 0.95 - 0.08 * f); skyU.overcast.value = over;
   sun.intensity = 3.2 * (1 - 0.6 * over); hemi.intensity = 1.4 + 0.4 * over;
@@ -510,21 +565,25 @@ function updateWorld(dt) {
   scene.fog.color.copy(fogC);
   scene.fog.near = S.wx === 'cloud' ? 25 : over ? 200 : 1200; scene.fog.far = S.wx === 'cloud' ? 320 : over ? 2500 : 12000;
   if (Math.abs(h - lastEnvH) > 1500 || over !== lastOver) { lastEnvH = h; lastOver = over; refreshEnv(); }
-  const adv = S.mode === 'fly' ? V * dt : V * dt * 0.15; travel += adv * Math.cos(g);
+  // the world moves past along the flight track (heading psi; +x is north-ish, +z to the right)
+  const hd = fly ? st.psi : 0, adv = fly ? V * dt * Math.cos(g) : V * dt * 0.15, dX = adv * Math.cos(hd), dZ = adv * Math.sin(hd); travel += adv;
+  wX += dX; wZ += dZ;
   // ground: far below in flight; under the wheels when parked
   groundY = park ? modelMinY() : -h; ground.position.y = groundY - (park ? 0.02 : 0); ground.visible = h < 8000 || park;
-  gTex.offset.x = (travel / 1500) % 1;
+  gTex.offset.set((wX / 1500) % 1, (-wZ / 1500) % 1);
   const snowy = S.wx === 'snow' || S.wx === 'frost';
   const cover = snowy && park ? clamp((st.snowMean || 0) / 0.6e-3, S.wx === 'frost' ? 0.25 : 0.35, S.wx === 'frost' ? 0.45 : 0.85) : 0;
   groundMat.color.setScalar(1 - 0.7 * cover); groundMat.emissive.setRGB(0.62 * cover, 0.65 * cover, 0.7 * cover);
   runway.visible = park; runway.position.set(0, groundY + 0.01, 0); runway.scale.set(Math.max(60, 3 * L_ref), Math.max(30, 1.6 * SL.P.wing.b), 1);
   runwayMat.color.setScalar(1 - 0.5 * cover); runwayMat.emissive.setRGB(0.45 * cover, 0.47 * cover, 0.5 * cover);
   for (const m of puffs) {
-    const u = m.userData; u.x -= adv * Math.cos(g); if (u.x < -6000) u.x += 12000;
+    const u = m.userData; u.x -= dX; u.z -= dZ; if (u.x < -6000) u.x += 12000; if (u.x > 6000) u.x -= 12000; if (u.z < -6000) u.z += 12000; if (u.z > 6000) u.z -= 12000;
     m.position.set(u.x, u.alt - h, u.z);
     const d = Math.hypot(u.x, u.alt - h, u.z); m.material.opacity = 0.9 * clamp((d - 350) / 700, 0, 1) * (park ? 0.6 : 1);
   }
-  for (const h of props) h.rotation.x += dt * (S.mode === 'park' ? 0 : ac.prop ? 38 : 12);
+  // propeller and fan: shown turning at a slowed rate in proportion to rpm, with a blur disc at speed (real rpm would strobe)
+  const E = ac.E, fr = E.n1 ? st.rpm / 100 : st.rpm / E.max;
+  for (const h of props) { h.rotation.x += dt * (fr > 0.01 ? (E.n1 ? 3 + 14 * fr : 3 + 24 * fr) : 0); if (h.userData.disc) h.userData.disc.material.opacity = 0.2 * clamp((fr - 0.15) / 0.6, 0, 1); }
 }
 let lastOver = -1;
 let minYcache = { key: '', y: -1 };
@@ -550,7 +609,7 @@ function sectionShape() {
   return { ...n, up: x => SL.naca.yc(n.m, n.p, x) + SL.naca.yt(n.t, x), lo: x => SL.naca.yc(n.m, n.p, x) - SL.naca.yt(n.t, x) };
 }
 const secCv = $('sec'), sx = secCv.getContext('2d');
-const SNX = 400, SNY = 180, SU0 = 0.12, SL_ = 84, sw = new Worker('wing-worker.js?v=11');
+const SNX = 400, SNY = 180, SU0 = 0.12, SL_ = 84, sw = new Worker('wing-worker.js?v=12');
 const sFieldC = document.createElement('canvas'); sFieldC.width = SNX; sFieldC.height = SNY; const sfx = sFieldC.getContext('2d'), sImg = sfx.createImageData(SNX, SNY);
 let sField = null, sMask = null, sPolys = [], sKey = '', sStarted = false, sHist = [], sShape = null, sAl = 0, sSep = 1, sView = 'p';
 const sGeom = al => ({ px: 0.24 * SNX + 0.25 * SL_, py: SNY / 2 + 6, L: SL_, aoa: al, ox: 0.25 });
@@ -693,20 +752,25 @@ function syncControls() {
   const sp = $('c-speed'); sp.min = Math.max(10, Math.round(ac.vmin * 0.8)); sp.max = Math.round(ac.vmax); sp.step = 1; sp.value = AP.vt;
   $('c-speed-o').textContent = `${kt(AP.vt)} kt`;
   $('c-alt').value = AP.ht; $('c-alt-o').textContent = `${int(AP.ht)} m`;
-  const manual = S.mode === 'tunnel' || (S.mode === 'fly' && S.aoaHold);
-  $('c-aoa').value = manual ? S.aoa : Math.round(st.alpha / D2R * 2) / 2; $('c-aoa-o').textContent = manual ? `${fmt(S.aoa, 1)}°` : 'auto'; $('c-aoa').disabled = S.mode === 'park';
-  $('c-aoa-auto').hidden = !(S.mode === 'fly' && S.aoaHold);
-  const gliding = S.mode === 'fly' && !S.engine; $('c-speed').disabled = gliding; $('c-alt').disabled = gliding;
+  const fly = S.mode === 'fly', tun = S.mode === 'tunnel', park = S.mode === 'park', man = fly && S.aoaHold, manual = tun || man;
+  $('c-aoa').value = manual ? S.aoa : Math.round(st.alpha / D2R * 2) / 2; $('c-aoa-o').textContent = manual ? `${fmt(S.aoa, 1)}°` : 'auto';
+  const gliding = fly && !S.engine && !man; $('c-speed').disabled = gliding; $('c-alt').disabled = gliding;
   if (gliding) { $('c-speed-o').textContent = 'best glide'; $('c-alt-o').textContent = 'gliding'; }
-  $('c-engine').hidden = S.mode !== 'fly';
+  $('c-thr').value = Math.round(S.thr * 100); $('c-thr-o').textContent = S.engine ? `${Math.round(S.thr * 100)}%` : 'engine off'; $('c-thr').disabled = !S.engine;
+  $('c-bank').value = S.bank; $('c-bank-o').textContent = S.bank ? `${Math.abs(S.bank)}° ${S.bank > 0 ? 'right' : 'left'}` : 'level';
+  // which controls apply: autopilot flies to speed and altitude targets; manual is wing angle and throttle; bank in both
+  const show = { 'c-pilot': fly, 'sl-speed': tun || (fly && !man), 'sl-alt': tun || (fly && !man), 'sl-aoa': !park, 'sl-thr': man, 'sl-bank': fly, 'c-engine': fly };
+  for (const [id, v] of Object.entries(show)) $(id).hidden = !v;
+  $('mode-hint').textContent = fly ? (man ? 'You fly: set the wing angle, throttle and bank. Speed and height follow from the physics.' : 'Free flight. The autopilot works the elevator and throttle to hold your speed and altitude.')
+    : tun ? 'Held still while air is blown past it, as in a real wind tunnel: pick any speed and angle without it climbing or falling.' : 'Parked on the runway: let snow or frost settle, de-ice, then take off.';
   const hR = S.mode === 'park' ? 0 : AP.ht; $('c-dt').value = Math.round(OAT(hR)); $('c-dt-o').textContent = `${fmt(OAT(hR), 0)} °C`; wxStatus();
   for (const [id, k] of [['t-trails', 'trails'], ['t-smoke', 'smoke'], ['t-lift', 'liftmap'], ['t-icehl', 'icehl']]) $(id).checked = S[k];
   $('c-takeoff').hidden = S.mode !== 'park';
   const sel = (id, v, attr = 'v') => document.querySelectorAll(`#${id} button`).forEach(b => b.setAttribute('aria-pressed', String(b.dataset[attr] === String(v))));
-  sel('mode', S.mode); sel('c-time', S.ts); sel('c-engine', S.engine ? 'on' : 'off'); sel('wx', S.wx); sel('aircraft', S.key, 'k');
+  sel('mode', S.mode); sel('c-pilot', S.aoaHold ? 'manual' : 'auto'); sel('c-time', S.ts); sel('c-engine', S.engine ? 'on' : 'off'); sel('wx', S.wx); sel('aircraft', S.key, 'k');
 }
 async function setAircraft(k) {
-  S.key = k; S.engine = true; S.aoaHold = false; SL.loadProject(k); base = JSON.parse(JSON.stringify(SL.P));
+  S.key = k; S.engine = true; S.aoaHold = false; S.bank = 0; SL.loadProject(k); base = JSON.parse(JSON.stringify(SL.P));
   AP.ht = SL.P.flight.h; AP.vt = SL.P.flight.V;
   rebuildAircraft(); newState();
   try { const M = await loadModel(k); if (S.key !== k) return; buildModel(M); } catch (e) { console.error(e); toast(e.message); }
@@ -715,13 +779,14 @@ async function setAircraft(k) {
 function setMode(m) {
   const prev = S.mode; S.mode = m; if (m !== 'fly') S.aoaHold = false; if (m === 'tunnel') S.engine = true;
   if (m === 'tunnel') { S.aoa = Math.round(st.alpha / D2R * 2) / 2; st.gam = 0; st.mode = 'hold'; }
-  if (m === 'park') { st.V = 0; st.gam = 0; st.alpha = 0; setView(S.view === 'tip' ? 'chase' : S.view); }
+  if (m === 'fly') { st.theta = st.alpha + st.gam; st.q = 0; }
+  if (m === 'park') { st.V = 0; st.gam = 0; st.alpha = 0; st.theta = 0; st.phi = 0; st.psi = 0; S.bank = 0; st.rpm = 0; setView(S.view === 'tip' ? 'chase' : S.view); }
   if (m === 'fly' && prev === 'park') { st.h = Math.max(st.h, AP.ht); st.V = AP.vt; }
   syncControls();
 }
 function takeOff() {
   const X0 = aeroOf(0, 'rime', 0), atm = SL.isa(150), Vs0 = Math.sqrt(2 * ac.m * G0 / (atm.rho * ac.S * X0.CLmax));
-  S.mode = 'fly'; S.engine = true; S.aoaHold = false; st.h = 150; st.V = 1.2 * Vs0; st.gam = 0.08; st.mode = 'hold'; AP.vt = Math.round(1.35 * Vs0); AP.ht = 900;
+  S.mode = 'fly'; S.engine = true; S.aoaHold = false; S.bank = 0; st.phi = 0; st.h = 150; st.V = 1.2 * Vs0; st.gam = 0.08; st.mode = 'hold'; st.alpha = ac.alpha0 + 0.8 * (X0.alphaS - ac.alpha0) / 1.1 / 1.44; st.theta = st.alpha + st.gam; st.q = 0; st.thr = 1; st.rpm = ac.E.n1 ? 95 : ac.E.max * 0.95; AP.vt = Math.round(1.35 * Vs0); AP.ht = 900;
   if (st.contam > 0.15) toast(`Rotating at ${kt(st.V)} kt, the normal take-off speed for a clean wing. With the wing ${st.cType === 'frost' ? 'frosted' : 'covered in snow'}, maximum lift is ${Math.round(30 * st.contam)}% lower.`, 6500);
   syncControls();
 }
@@ -747,7 +812,9 @@ function wxStatus() {
   if (!st) return;
   const el = $('wx-status'), Tc = OAT(hNow()), r = iceRate() * 60e3, w = S.wx; let txt, cls = '', fix = null;
   const T = `${fmt(Tc, 0)} °C`;
-  if (w === 'clear') txt = 'Clear air: nothing to freeze. Pick <b>Icing cloud</b> or <b>Freezing rain</b> to grow ice, or <b>Snow</b> while parked.';
+  if (w === 'clear') { const ice = st.k > 0.0005, sn = st.contam > 0.05;
+    txt = ice || sn ? `Clear air, but <b>${ice ? `${Math.round(st.k * 1000)} mm of ${st.kind} ice` : st.cType}</b> is still on the wing${ice ? ` (stall angle now ${fmt(O.X ? O.X.alphaS / D2R : 0, 1)}°)` : ''}.` : 'Clear air: nothing to freeze. Pick <b>Icing cloud</b> or <b>Freezing rain</b> to grow ice, or <b>Snow</b> on the ground.';
+    if (ice || sn) { fix = ['De-ice', () => $('c-deice').click()]; cls = 'warn'; } }
   else if (w === 'cloud' || w === 'frz') {
     if (S.mode === 'park') { txt = 'Icing needs airflow. Switch to <b>Fly</b> or <b>Wind tunnel</b>.'; fix = ['Fly', () => setMode('fly')]; cls = 'warn'; }
     else if (Tc >= 0) { txt = `${T} is above freezing: the water stays liquid, so no ice.`; fix = [w === 'frz' ? 'Set −3 °C' : 'Set −8 °C', () => setOAT(w === 'frz' ? -3 : -8)]; cls = 'warn'; }
@@ -765,8 +832,25 @@ function wxStatus() {
 on('c-time', 'click', e => { const b = e.target.closest('button'); if (b) { S.ts = +b.dataset.v; syncControls(); } });
 on('c-speed', 'input', e => { AP.vt = +e.target.value; if (S.mode === 'tunnel') st.V = AP.vt; $('c-speed-o').textContent = `${kt(AP.vt)} kt`; });
 on('c-alt', 'input', e => { AP.ht = +e.target.value; if (S.mode === 'tunnel') st.h = AP.ht; $('c-alt-o').textContent = `${int(AP.ht)} m`; syncControls(); });
-on('c-aoa', 'input', e => { S.aoa = +e.target.value; if (S.mode === 'fly' && !S.aoaHold) { S.aoaHold = true; st.mode = 'hold'; syncControls(); } $('c-aoa-o').textContent = `${fmt(S.aoa, 1)}°`; });
-on('c-aoa-auto', 'click', () => { S.aoaHold = false; st.stallTold = false; if (st.alpha > O.X.alphaS) { st.mode = 'recover'; st.stallH = st.h; st.recT = 0; } AP.ht = Math.max(300, Math.round(st.h / 100) * 100); toast('Autopilot has the wing angle again: it holds height and speed.'); syncControls(); });
+function setPilot(manual) {
+  if (manual === S.aoaHold || S.mode !== 'fly') return;
+  if (manual) { S.aoaHold = true; S.aoa = Math.round(st.alpha / D2R * 2) / 2; S.thr = Math.round(st.thr * 100) / 100; st.mode = 'hold'; }
+  else { S.aoaHold = false; st.stallTold = false; if (st.alpha > O.X.alphaS) { st.mode = 'recover'; st.stallH = st.h; st.recT = 0; } AP.ht = clamp(Math.round(st.h / 100) * 100, 300, 12000); AP.vt = clamp(Math.round(st.V), +$('c-speed').min, +$('c-speed').max); toast('Autopilot on: it holds this height and speed.'); }
+  syncControls();
+}
+on('c-pilot', 'click', e => { const b = e.target.closest('button'); if (b) setPilot(b.dataset.v === 'manual'); });
+on('c-aoa', 'input', e => { if (S.mode === 'fly' && !S.aoaHold) setPilot(true); S.aoa = +e.target.value; $('c-aoa-o').textContent = `${fmt(S.aoa, 1)}°`; });
+on('c-thr', 'input', e => { S.thr = +e.target.value / 100; $('c-thr-o').textContent = `${e.target.value}%`; });
+on('c-bank', 'input', e => { S.bank = +e.target.value; syncControls(); });
+addEventListener('keydown', e => {   // keyboard flying in Manual: arrows for wing angle and bank, W/S for throttle
+  if (S.mode !== 'fly' || e.target.closest('input, textarea, select')) return;
+  const k = e.key; let used = true;
+  if (k === 'ArrowUp' || k === 'ArrowDown') { setPilot(true); S.aoa = clamp(S.aoa + (k === 'ArrowUp' ? 0.5 : -0.5), -4, 26); }
+  else if (k === 'ArrowLeft' || k === 'ArrowRight') S.bank = clamp(S.bank + (k === 'ArrowRight' ? 5 : -5), -60, 60);
+  else if (k === 'w' || k === 's') { setPilot(true); S.thr = clamp(S.thr + (k === 'w' ? 0.05 : -0.05), 0, 1); }
+  else used = false;
+  if (used) { e.preventDefault(); syncControls(); }
+});
 on('c-engine', 'click', e => { const b = e.target.closest('button'); if (b && (b.dataset.v === 'on') !== S.engine) setEngine(b.dataset.v === 'on'); });
 on('c-dt', 'input', e => { const hR = S.mode === 'park' ? 0 : AP.ht; S.dT = +e.target.value - SL.isa(hR).Tc; $('c-dt-o').textContent = `${fmt(OAT(hR), 0)} °C`; wxStatus(); });
 on('c-deice', 'click', () => { if (S.mode !== 'park') { st.deiceT = st.t; bootT = performance.now(); } const b = Math.round(st.k * 1000), s = st.contam; if (b < 1 && s < 0.05) { toast('Nothing to remove.'); return; } clearSurface(S.mode === 'park' ? 0 : 0.12); toast(S.mode === 'park' ? 'De-iced on the ground: the wings are clean.' : `De-iced: leading-edge ice ${b} → ${Math.round(st.k * 1000)} mm.`); });
@@ -785,10 +869,14 @@ function gauges() {
   $('g-v').textContent = `${kt(S.mode === 'park' ? 0 : st.V)} kt`; $('g-h').textContent = S.mode === 'park' ? 'ground' : `${int(st.h)} m`;
   $('g-vs').textContent = S.mode === 'fly' ? `${O.vs >= 0 ? '+' : '−'}${int(Math.abs(O.vs * 196.85))} fpm` : '—';
   $('g-a').textContent = `${fmt(st.alpha / D2R, 1)}°`; $('g-ld').textContent = S.mode === 'park' ? '—' : fmt(O.L / Math.max(1, O.D), 1);
-  $('g-ice').textContent = st.k > 0.0005 ? `${Math.round(st.k * 1000)} mm ${st.kind}` : 'none';
-  $('g-snow').textContent = st.contam > 0.02 ? `${st.cType} · lift −${Math.round(30 * st.contam)}%` : 'clean';
-  $('g-oat').textContent = `${fmt(OAT(S.mode === 'park' ? 0 : st.h), 0)} °C`;
-  $('g-vstall').textContent = S.mode === 'park' ? '—' : `${kt(O.Vs)} kt`;
+  if ($('g-ice')) $('g-ice').textContent = st.k > 0.0005 ? `${Math.round(st.k * 1000)} mm ${st.kind}` : 'none';
+  if ($('g-snow')) $('g-snow').textContent = st.contam > 0.02 ? `${st.cType} · lift −${Math.round(30 * st.contam)}%` : 'clean';
+  if ($('g-oat')) $('g-oat').textContent = `${fmt(OAT(S.mode === 'park' ? 0 : st.h), 0)} °C`;
+  const nn = Math.max(1, O.n || 1); $('g-vstall').textContent = S.mode === 'park' ? '—' : `${kt(O.Vs * Math.sqrt(nn))} kt`;   // stall speed at the current load factor
+  $('g-as').textContent = S.mode === 'park' ? '—' : `${fmt(X.alphaS / D2R, 1)}°`;
+  $('g-n').textContent = S.mode === 'park' ? '1.0 g' : `${fmt(O.n, 1)} g`;
+  const E = ac.E; $('g-eng').textContent = S.mode === 'park' ? 'off' : E.n1 ? `N1 ${Math.round(st.rpm)}%` : st.rpm < 5 ? 'prop stopped' : `${Math.round(st.rpm / 10) * 10} rpm`;
+  $('g-eng').previousElementSibling.textContent = S.mode !== 'park' && !S.engine ? (st.rpm < 5 && !E.n1 ? 'Engine off' : 'Windmilling') : 'Engine';
   const el = $('g-state'), ban = $('banner');
   let txt, cls = '';
   if (O.stalled) { txt = 'Stalled'; cls = 'bad'; }
@@ -843,10 +931,10 @@ function loop(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now; frame++;
   if (!ac || !corner) return;
   for (let i = tweens.length - 1; i >= 0; i--) { const t = tweens[i]; t.t += dt; const u = t.dur ? clamp(t.t / t.dur, 0, 1) : 1, e = u * u * (3 - 2 * u); t.set(t.from + (t.to - t.from) * e); if (u >= 1) tweens.splice(i, 1); }
-  if (S.mode === 'fly') { const sim = dt * S.ts, n = Math.max(1, Math.ceil(sim / 0.02)); for (let i = 0; i < n; i++) flightStep(sim / n); }
-  else if (S.mode === 'tunnel') { st.alpha += (S.aoa * D2R - st.alpha) * Math.min(1, dt * 4); st.V = AP.vt; st.h += (AP.ht - st.h) * Math.min(1, dt * 2); st.gam = 0; accrete(dt * S.ts); }
+  if (S.mode === 'fly') { const sim = dt * S.ts, n = Math.max(1, Math.ceil(sim / 0.01)); for (let i = 0; i < n; i++) flightStep(sim / n); }
+  else if (S.mode === 'tunnel') { st.alpha += (S.aoa * D2R - st.alpha) * Math.min(1, dt * 4); st.V = AP.vt; st.h += (AP.ht - st.h) * Math.min(1, dt * 2); st.gam = 0; st.theta = st.alpha; st.q = 0; st.phi = 0; accrete(dt * S.ts); }
   else { st.alpha = 0; st.gam = 0; }
-  outputs();
+  outputs(); engineStep(dt);
   if (S.mode !== 'park' && (Math.abs(st.alpha - fieldAlpha) > 0.5 * D2R || fieldVer !== SL.version)) requestField(st.alpha);
   stepSmoke(dt); stepPrecip(dt);
   if (now - slowT > 200) { const d = (now - slowT) / 1000 * (S.mode === 'fly' || S.mode === 'tunnel' || S.mode === 'park' ? S.ts : 1); slowT = now; surfaceUpdate(Math.min(d, 20)); sectionUpdate(false); flowUpdate(); wxStatus(); }
@@ -860,7 +948,7 @@ function loop(now) {
   }
 }
 document.addEventListener('visibilitychange', () => sw.postMessage({ type: 'run', running: !document.hidden }));   // no simulation in a hidden tab
-window.SLIP = { S, AP, get st() { return st; }, get corner() { return corner; }, setMode, setAircraft, setView };   // console/debug access
+window.SLIP = { S, AP, get st() { return st; }, get ac() { return ac; }, get O() { return O; }, setPilot, setEngine, get corner() { return corner; }, setMode, setAircraft, setView };   // console/debug access
 (async () => {
   CAT = await (await fetch('models/catalog.json?v=' + VER)).json();
   for (const [k, m] of Object.entries(CAT)) SL.PROJECTS[k] = { name: m.short, wing: m.wing, tail: m.tail, body: m.body, mass: m.mass, cg: m.cg, engine: m.engine, flight: m.flight };
