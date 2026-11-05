@@ -5,7 +5,9 @@ Fly a real aircraft and watch what the air and the weather do to it. `index.html
 - **Ice** builds on the real surfaces wherever the airflow strikes them (wing and tail leading edges, nose, struts, windscreen), using local impingement × Langmuir–Blodgett collection efficiency. Cold, small-drop cloud gives milky **rime** on the leading edge; freezing rain gives clear **glaze** that runs back over the surface. Ice lowers maximum lift and raises drag (empirical iced-wing penalties), so the stall speed rises.
 - **Snow and frost** settle on the upward-facing surfaces of a parked aircraft and change the take-off (FAA AC 120-58 contamination penalties, up to 30% lift loss).
 - **Airflow:** blue wingtip vortex trails, smoke streams that follow the vortex-lattice velocity field, a lift map on the wing, and a live 2D lattice-Boltzmann cross-section of the selected aircraft's own wing section (NACA 2412, NACA 2213, or a supercritical-style approximation for the airliners) coloured by simulated pressure or speed, with the lift, stagnation point and separation point marked.
-- Six guided experiments: lift, stall, wingtip vortices, flying into icing cloud, freezing rain, and snow and frost before take-off.
+- **Airflow smoke** coloured by boundary-layer state: laminar, transition, turbulent, separated. Transition follows the chord Reynolds number, wing sweep and section lift; ice, snow, frost or residue after a de-ice cycle trips the flow at the leading edge; separation spreads forward from the trailing edge towards the stall.
+- **Wing angle in flight:** drag it to hold an angle (and fly into a stall); **Auto** hands it back to the autopilot.
+- **Engine off:** the autopilot holds best-glide speed. The panel shows each aircraft's best glide ratio, L/D max = ½√(πeAR/CD0), the range and time to the ground, and the touchdown distance.
 
 `lab.html` is the engineering workstation with the full numbers. One project aircraft is shared by five modules.
 

@@ -92,6 +92,28 @@ button, input, select { font: inherit; color: inherit; }
 .btn.primary { background: var(--ink); color: #0b1520; border-color: var(--ink); }
 .btn.quiet { border-color: transparent; background: transparent; color: var(--ink-2); padding-inline: 6px; }
 
+/* performance panel */
+.pc { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--edge); }
+.ac-card + .pc { border-top: 0; padding-top: 0; }
+.pc h2 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.pc h2 span { font: 500 11.5px var(--f-text); color: var(--ink-3); }
+.kv2 { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; font-size: 12.5px; color: var(--ink-2); }
+.kv2 b { font: 500 13px var(--f-num); color: var(--ink); text-align: right; }
+.cmp { display: flex; flex-direction: column; gap: 4px; }
+.cmp .r { display: grid; grid-template-columns: 74px 1fr 44px; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink-2); }
+.cmp .r i { height: 6px; border-radius: 4px; background: rgba(255,255,255,.14); position: relative; overflow: hidden; }
+.cmp .r i b { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: rgba(160,190,220,.55); transition: width .4s ease; }
+.cmp .r.me { color: var(--ink); font-weight: 600; }
+.cmp .r.me i b { background: var(--air); }
+.cmp .r em { font: 500 11.5px var(--f-num); font-style: normal; text-align: right; }
+.note { margin: 0; font-size: 12px; color: var(--ink-2); line-height: 1.45; }
+.note.dim { color: var(--ink-3); font-size: 11.5px; }
+.note b { color: var(--ink); font-weight: 600; }
+.flow { height: 12px; border-radius: 6px; background: rgba(255,255,255,.1); overflow: hidden; display: flex; }
+.flow i { height: 100%; transition: flex-basis .4s ease; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+
 /* gauges */
 .side { grid-area: right; align-self: start; display: flex; flex-direction: column; gap: 14px; max-height: 100%; overflow: auto; }
 .gauges { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
@@ -115,7 +137,7 @@ button, input, select { font: inherit; color: inherit; }
 .sec-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 #sec-name { font-size: 11.5px; color: var(--ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .seg.mini-seg button { padding: 3px 8px; font-size: 11.5px; }
-.section p { margin: 0; font-size: 11.5px; line-height: 1.4; color: var(--ink-2); }
+.section p { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin: 0; font-size: 11.5px; line-height: 1.4; color: var(--ink-2); }
 
 /* motion: gentle fades for messages and state changes */
 @keyframes toastIn { from { opacity: 0; transform: translate(-50%, -44%); } to { opacity: 1; transform: translate(-50%, -50%); } }
@@ -205,7 +227,27 @@ input[type=range]:disabled { opacity: .35; }
     <a class="link card" href="lab.html">Engineering view</a>
   </header>
 
-  <section class="exp card" id="exp" aria-label="Experiments"></section>
+  <section class="exp card" id="perf" aria-label="Aircraft and performance">
+    <div class="ac-card"><b id="ac-name"></b><span id="ac-desc"></span><small id="ac-src"></small></div>
+    <div class="pc">
+      <h2>Gliding <span id="gl-state"></span></h2>
+      <div class="kv2">
+        <span>Best glide ratio</span><b id="gl-ld">—</b>
+        <span>Best glide speed</span><b id="gl-v">—</b>
+        <span id="gl-rk">Glide range from here</span><b id="gl-r">—</b>
+        <span>Sink rate now</span><b id="gl-sink">—</b>
+      </div>
+      <div class="cmp" id="gl-cmp" aria-label="Best glide ratio of each aircraft"></div>
+      <p class="note" id="gl-note">Glide ratio is lift ÷ drag: how many metres forward for each metre of height lost. Long, slender wings (high aspect ratio) and low drag give the best gliders.</p>
+    </div>
+    <div class="pc">
+      <h2>Flow over the wing</h2>
+      <div class="flow" id="fl-bar" aria-hidden="true"></div>
+      <p class="note" id="fl-note">—</p>
+      <div class="legend"><span><i style="background:#5fd0ff"></i>Laminar</span><span><i style="background:#ffd75e"></i>Transition</span><span><i style="background:#ff9a45"></i>Turbulent</span><span><i style="background:#ff5a52"></i>Separated</span></div>
+      <p class="note dim" id="fl-hint">Turn on <b>Airflow smoke</b> to see it on the aircraft.</p>
+    </div>
+  </section>
 
   <aside class="side">
     <div class="gauges card" aria-label="Live readings">
@@ -243,6 +285,8 @@ input[type=range]:disabled { opacity: .35; }
         <div class="sl"><label for="c-speed">Speed</label><output id="c-speed-o"></output><input type="range" id="c-speed"></div>
         <div class="sl"><label for="c-alt">Altitude</label><output id="c-alt-o"></output><input type="range" id="c-alt" min="0" max="12000" step="100"></div>
         <div class="sl"><label for="c-aoa">Wing angle</label><output id="c-aoa-o"></output><input type="range" id="c-aoa" min="-4" max="24" step="0.5"></div>
+        <button class="btn sm" id="c-aoa-auto" type="button" hidden title="Hand the wing angle back to the autopilot">Auto</button>
+        <div class="seg" id="c-engine" role="group" aria-label="Engine"><button data-v="on" aria-pressed="true">Engine on</button><button data-v="off" aria-pressed="false">Engine off</button></div>
       </div>
     </div>
     <div class="sep"></div>
@@ -268,10 +312,10 @@ input[type=range]:disabled { opacity: .35; }
 </div>
 
 <script src="vendor/three-0.149.0.min.js"></script>
-<script src="core.js?v=10"></script>
-<script src="geom.js?v=10"></script>
-<script src="vlm.js?v=10"></script>
-<script src="aero.js?v=10"></script>
-<script src="fly.js?v=10"></script>
+<script src="core.js?v=11"></script>
+<script src="geom.js?v=11"></script>
+<script src="vlm.js?v=11"></script>
+<script src="aero.js?v=11"></script>
+<script src="fly.js?v=11"></script>
 </body>
 </html>
