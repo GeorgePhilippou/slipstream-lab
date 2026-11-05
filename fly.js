@@ -128,11 +128,11 @@ for (let i = 0; i < 80; i++) {
 // ====================================================== aircraft
 const plane = new THREE.Group(); scene.add(plane);
 const body = new THREE.Group(); body.matrixAutoUpdate = false; plane.add(body);
-let L_ref = 10, xcg = 0, model = null, meshes = [], iceGeo = null, snowGeo = null, prop = null, propAxisX = 0;
-let corner = null;   // per-corner data for airframe + glass: pos, nrm, wing flag, noise, ice t, snow s
-const paint = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.38, metalness: 0.05, clearcoat: 0.4, clearcoatRoughness: 0.2, envMapIntensity: 0.65 });
-const glassMat = new THREE.MeshPhysicalMaterial({ color: 0x14202b, roughness: 0.04, metalness: 0.95, envMapIntensity: 1.3 });
-const propMat = new THREE.MeshStandardMaterial({ color: 0x24272b, roughness: 0.45, metalness: 0.5, transparent: true, opacity: 0.9 });
+let L_ref = 10, xcg = 0, model = null, meshes = [], iceGeo = null, snowGeo = null, props = [];
+let corner = null, baseCol = null;   // per-corner data for airframe + glass: pos, nrm, wing flag, noise, ice t, snow s
+const paint = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.38, metalness: 0.05, clearcoat: 0.4, clearcoatRoughness: 0.2, envMapIntensity: 0.65, side: THREE.DoubleSide });
+const glassMat = new THREE.MeshPhysicalMaterial({ side: THREE.DoubleSide, color: 0x14202b, roughness: 0.04, metalness: 0.95, envMapIntensity: 1.3 });
+const propMat = new THREE.MeshStandardMaterial({ color: 0x24272b, roughness: 0.45, metalness: 0.5, side: THREE.DoubleSide });
 const iceMat = new THREE.MeshPhysicalMaterial({ vertexColors: true, transparent: true, roughness: 0.6, metalness: 0, clearcoat: 0.3, clearcoatRoughness: 0.1, sheen: 1, sheenColor: new THREE.Color(0.8, 0.9, 1), sheenRoughness: 0.5, envMapIntensity: 1.2, alphaTest: 0.04 });
 const snowMat = new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, roughness: 0.95, metalness: 0, alphaTest: 0.04 });
 const cache = {};
@@ -146,7 +146,7 @@ async function loadModel(key) {
   return (cache[key] = { nt, pos: new Float32Array(buf, 8, nt * 9), nrm: new Int8Array(buf, 8 + nt * 36, nt * 9), part: new Uint8Array(buf, 8 + nt * 45, nt) });
 }
 const PAINT = { c172: { top: [0.03, 0.045, 0.085], bottom: [0.4, 0.42, 0.45], wing: [0.035, 0.05, 0.09], dark: [0.08, 0.08, 0.09] },
-  spitfire: { top: [0.33, 0.37, 0.3], bottom: [0.62, 0.66, 0.66], wing: [0.36, 0.39, 0.32], dark: [0.1, 0.1, 0.1] },
+  spitfire: { top: [0.07, 0.085, 0.04], camo: [0.15, 0.16, 0.17], bottom: [0.3, 0.315, 0.33], wing: [0.07, 0.085, 0.04], dark: [0.05, 0.05, 0.05] },   // RAF dark green / ocean grey over medium sea grey (linear RGB)
   b738: { top: [0.95, 0.95, 0.96], bottom: [0.2, 0.27, 0.42], wing: [0.62, 0.65, 0.69], dark: [0.15, 0.15, 0.16] },
   a320: { top: [0.95, 0.95, 0.96], bottom: [0.78, 0.8, 0.83], wing: [0.62, 0.65, 0.69], dark: [0.15, 0.15, 0.16] } };
 function inWing(x, y, z) {
@@ -167,19 +167,27 @@ function buildModel(M) {
     if (col) for (let v = 0; v < n; v++) {
       const x = p[v * 3], y = p[v * 3 + 1], z = p[v * 3 + 2], nz = nr[v * 3 + 2];
       const c = dark[(v / 3) | 0] ? pal.dark : inWing(x, y, z) ? pal.wing : nz < -0.35 ? pal.bottom : pal.top;
+      if (pal.camo && c !== pal.dark && c !== pal.bottom) {   // disruptive two-tone pattern in plan view
+        const w = Math.sin(x * 0.9 + 1.3 * Math.sin(y * 0.55)) + Math.sin(y * 0.8 - 0.7 * x + 2) * 0.8 + Math.sin((x + y) * 1.7) * 0.25;
+        if (w > 0.15) { col[v * 3] = pal.camo[0]; col[v * 3 + 1] = pal.camo[1]; col[v * 3 + 2] = pal.camo[2]; continue; }
+      }
       col[v * 3] = c[0]; col[v * 3 + 1] = c[1]; col[v * 3 + 2] = c[2];
     }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nr, 3)); if (col) g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     return g;
   };
-  const gA = mk(groups[0], true), gG = mk(groups[1], false), gP = mk(groups[2], false);
+  const gA = mk(groups[0], true), gG = mk(groups[1], false), gP = mk(groups[2], false); baseCol = gA.attributes.color.array.slice();
   const mA = new THREE.Mesh(gA, paint), mG = new THREE.Mesh(gG, glassMat); body.add(mA, mG); meshes.push(mA, mG);
-  // propeller / fan spins about its own axis (body x)
-  prop = null;
+  // each propeller or engine fan spins about its own axis (parallel to body x): split them by spanwise position
+  props = [];
   if (groups[2].length) {
-    gP.computeBoundingBox(); const c = new THREE.Vector3(); gP.boundingBox.getCenter(c); gP.translate(0, -c.y, -c.z);
-    const holder = new THREE.Group(); holder.position.set(0, c.y, c.z); const mP = new THREE.Mesh(gP, propMat); holder.add(mP); body.add(holder); meshes.push(mP); prop = holder;
-    holder.geometry = gP;
+    const ys = groups[2].map(t => [(M.pos[t * 9 + 1] + M.pos[t * 9 + 4] + M.pos[t * 9 + 7]) / 3, t]).sort((a, b) => a[0] - b[0]), clusters = [[]];
+    ys.forEach(([y, t], i) => { if (i && y - ys[i - 1][0] > 0.4) clusters.push([]); clusters[clusters.length - 1].push(t); });
+    for (const cl of clusters) {
+      const g = mk(cl, false); g.computeBoundingBox(); const c = new THREE.Vector3(); g.boundingBox.getCenter(c); g.translate(0, -c.y, -c.z);
+      const holder = new THREE.Group(); holder.position.set(0, c.y, c.z); const mP = new THREE.Mesh(g, propMat); holder.add(mP); body.add(holder); meshes.push(mP); props.push(holder);
+    }
+    gP.dispose();
   }
   // surface contamination layers share the airframe + glass corners
   const nA = gA.attributes.position.count, nG = gG.attributes.position.count, n = nA + nG;
@@ -250,7 +258,7 @@ function liftMap(off) {
   const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 160), lossF = O.X ? O.X.CLmax / ac.CLmax : 1;
   for (let v = 0; v < corner.nA; v++) {
     if (!corner.wing[v]) continue;
-    let c = pal.wing;
+    let c = [baseCol[v * 3], baseCol[v * 3 + 1], baseCol[v * 3 + 2]];
     if (!off && S.liftmap) {
       const y = Math.abs(pos[v * 3 + 1]); let k = 0; while (k < strips.length - 1 && strips[k + 1].mid[1] < y) k++;
       const sp = strips[k], r = clamp((sp.cl0 + sp.cla * st.alpha) / (sp.clmax * lossF), 0, 1.4);
@@ -263,7 +271,7 @@ function liftMap(off) {
 
 // ====================================================== flow field, wingtip-vortex trails and smoke
 let field = null, fieldBusy = false, fieldWant = null, fieldAlpha = 99, fieldVer = -1, box = null;
-const fw = new Worker('field-worker.js?v=8');
+const fw = new Worker('field-worker.js?v=9');
 fw.onmessage = e => { field = e.data; fieldBusy = false; buildTrails(); if (fieldWant) { const w = fieldWant; fieldWant = null; requestField(w.alpha); } };
 function requestField(alpha) {
   if (!A) return;
@@ -430,27 +438,47 @@ function updateWorld(dt) {
     m.position.set(u.x, u.alt - h, u.z);
     const d = Math.hypot(u.x, u.alt - h, u.z); m.material.opacity = 0.9 * clamp((d - 350) / 700, 0, 1) * (park ? 0.6 : 1);
   }
-  if (prop) prop.rotation.x += dt * (S.mode === 'park' ? 0 : ac.prop ? 38 : 12);
+  for (const h of props) h.rotation.x += dt * (S.mode === 'park' ? 0 : ac.prop ? 38 : 12);
 }
 let lastOver = -1;
 let minYcache = { key: '', y: -1 };
 function modelMinY() { if (minYcache.key === S.key) return minYcache.y; const g = meshes[0].geometry; g.computeBoundingBox(); minYcache = { key: S.key, y: g.boundingBox.min.z }; return minYcache.y; }
 
 // ====================================================== live 2D wing section (lattice Boltzmann)
+// Each aircraft's own wing section, simulated live. Colour is the simulated pressure (from the lattice density),
+// white streaks are smoke; overlays mark the airflow direction, lift, the stagnation point and flow separation.
+const SECTIONS = {
+  c172: { kind: 'naca', m: 0.02, p: 0.4, t: 0.12, name: 'NACA 2412', where: 'Cessna 172 wing' },
+  spitfire: { kind: 'naca', m: 0.02, p: 0.2, t: 0.13, name: 'NACA 2213', where: 'Spitfire wing root (thins to 9.4% at the tip)' },
+  b738: { kind: 'sc', t: 0.12, name: 'Supercritical section', where: '737 wing, approximate: Boeing’s exact sections are not published' },
+  a320: { kind: 'sc', t: 0.12, name: 'Supercritical section', where: 'A320 wing, approximate: Airbus’s exact sections are not published' },
+};
+function sectionShape() {
+  const s = SECTIONS[S.key];
+  if (s && s.kind === 'sc') {   // flat-topped, aft-loaded profile with a cusped lower trailing edge (SC(2)-like)
+    const t = s.t, yt = x => 5 * t * (0.2969 * Math.sqrt(x) - 0.1260 * x - 0.3516 * x * x + 0.2843 * x ** 3 - 0.1036 * x ** 4) * (1 + 0.18 * Math.sin(Math.PI * x));
+    const yc = x => 0.12 * x ** 2.4 * (1 - x) * (1 + x) - 0.004 * Math.sin(Math.PI * x) ** 2;
+    return { ...s, up: x => yc(x) + yt(x) * 0.9, lo: x => yc(x) - yt(x) * 1.1 + 0.035 * Math.max(0, x - 0.55) ** 2 * (x - 0.55) / 0.45 * 2 };
+  }
+  const n = s || (() => { const q = SL.section(); return { kind: 'naca', m: q.m / 100, p: q.p / 10, t: q.t / 100, name: `NACA ${SL.P.wing.sec}`, where: 'wing' }; })();
+  return { ...n, up: x => SL.naca.yc(n.m, n.p, x) + SL.naca.yt(n.t, x), lo: x => SL.naca.yc(n.m, n.p, x) - SL.naca.yt(n.t, x) };
+}
 const secCv = $('sec'), sx = secCv.getContext('2d');
-const SNX = 300, SNY = 140, SU0 = 0.1, SL_ = Math.round(0.2 * SNX), sw = new Worker('wing-worker.js?v=8');
+const SNX = 400, SNY = 180, SU0 = 0.12, SL_ = 84, sw = new Worker('wing-worker.js?v=9');
 const sFieldC = document.createElement('canvas'); sFieldC.width = SNX; sFieldC.height = SNY; const sfx = sFieldC.getContext('2d'), sImg = sfx.createImageData(SNX, SNY);
-let sField = null, sMask = null, sPolys = [], sKey = '', sStarted = false, sHist = [];
-const sGeom = al => ({ px: 0.22 * SNX + 0.25 * SL_, py: SNY / 2, L: SL_, aoa: al, ox: 0.25 });
+let sField = null, sMask = null, sPolys = [], sKey = '', sStarted = false, sHist = [], sShape = null, sAl = 0, sSep = 1, sView = 'p';
+const sGeom = al => ({ px: 0.24 * SNX + 0.25 * SL_, py: SNY / 2 + 6, L: SL_, aoa: al, ox: 0.25 });
+const secTf = (al) => { const gi = sGeom(al), a = -al * D2R, ca = Math.cos(a), sa = Math.sin(a); return ([x, y]) => { const dx = x - 0.25; return [gi.px + SL_ * (dx * ca - y * sa), gi.py + SL_ * (dx * sa + y * ca)]; }; };
 function sectionPolys(al) {
-  const s = SL.section(), m = s.m / 100, p = s.p / 10, t = s.t / 100, gi = sGeom(al), a = -al * D2R, ca = Math.cos(a), sa = Math.sin(a);
-  const tf = ([x, y]) => { const dx = x - 0.25; return [gi.px + SL_ * (dx * ca - y * sa), gi.py + SL_ * (dx * sa + y * ca)]; };
-  const polys = [SL.naca.points(m, p, t, 0).map(tf)], kc = st.k / ac.c;
-  if (kc > 2e-4) {
+  const sh = sectionShape(), tf = secTf(al), N = 120, up = [], lo = [];
+  for (let i = 0; i <= N; i++) { const x = 0.5 * (1 - Math.cos(Math.PI * i / N)); up.push([x, sh.up(x)]); lo.push([x, sh.lo(x)]); }
+  const body = up.slice().reverse().concat(lo.slice(1)), polys = [body.map(tf)], kc = st.k / ac.c;
+  sShape = { sh, up: up.map(tf), body };
+  if (kc > 2e-4) {   // ice shape: rime hugs the leading edge, glaze grows horns
     const horn = st.kind === 'glaze' ? 1 : st.kind === 'mixed' ? 0.5 : 0, outer = [], inner = [];
     for (let i = 0; i <= 60; i++) {
-      const s2 = -1 + i / 30, u = 0.1 * s2 * s2, up = s2 >= 0, y = SL.naca.yc(m, p, u) + (up ? 1 : -1) * SL.naca.yt(t, u);
-      const u2 = u + 1e-3, y2 = SL.naca.yc(m, p, u2) + (up ? 1 : -1) * SL.naca.yt(t, u2); let nx = -(y2 - y), ny = u2 - u; if (!up) { nx = -nx; ny = -ny; }
+      const s2 = -1 + i / 30, u = 0.1 * s2 * s2, upS = s2 >= 0, f = upS ? sh.up : sh.lo, y = f(u), u2 = u + 1e-3, y2 = f(u2);
+      let nx = -(y2 - y), ny = u2 - u; if (!upS) { nx = -nx; ny = -ny; }
       const nl = Math.hypot(nx, ny) || 1, aa = Math.abs(s2), th = Math.min(0.08, kc * 1.4) * ((1 - horn) * Math.exp(-((aa / 0.55) ** 2)) + horn * (0.35 * Math.exp(-((aa / 0.4) ** 2)) + 1.1 * Math.exp(-(((aa - 0.55) / 0.18) ** 2))));
       outer.push(tf([u + nx / nl * th, y + ny / nl * th])); inner.push(tf([u - nx / nl * 0.004, y - ny / nl * 0.004]));
     }
@@ -469,30 +497,84 @@ function raster(ps) {
   return m;
 }
 function sectionUpdate(force) {
-  const al = clamp(Math.round(st.alpha / D2R * 2) / 2, -5, 25), key = `${SL.P.wing.sec}|${al}|${Math.round(st.k * 2000)}|${st.kind}`;
-  if (!force && key === sKey) return; sKey = key;
+  const al = clamp(Math.round(st.alpha / D2R * 2) / 2, -5, 25), key = `${S.key}|${SL.P.wing.sec}|${al}|${Math.round(st.k * 2000)}|${st.kind}`;
+  if (!force && key === sKey) return; sKey = key; sAl = al;
   sPolys = sectionPolys(al); sMask = raster(sPolys);
-  if (!sStarted) { sStarted = true; sw.postMessage({ type: 'init', nx: SNX, ny: SNY, u0: SU0, tau: 3 * SU0 * SL_ / 3000 + 0.5, clean: sMask, geom: sGeom(al) }); sw.postMessage({ type: 'frame' }); }
-  else sw.postMessage({ type: 'geom', clean: sMask, geom: sGeom(al) });
+  const sh = sShape.sh; $('sec-name').textContent = `${sh.name} · ${sh.where}`;
+  if (!sStarted) { sStarted = true; sw.postMessage({ type: 'init', nx: SNX, ny: SNY, u0: SU0, tau: 3 * SU0 * SL_ / 4000 + 0.5, clean: sMask, geom: sGeom(al) }); sw.postMessage({ type: 'frame' }); }
+  else { sw.postMessage({ type: 'geom', clean: sMask, geom: sGeom(al) }); sHist.length = 0; }
 }
 sw.onmessage = e => { const m = e.data; if (m.type !== 'field') { if (m.type !== 'blowup') sw.postMessage({ type: 'frame' }); return; } sField = m; if (m.fn && m.steps * SU0 / SL_ > 0.6) { sHist.push(m.Fy / (0.5 * SU0 * SU0 * SL_)); if (sHist.length > 90) sHist.shift(); } setTimeout(() => sw.postMessage({ type: 'frame' }), 30); };
+document.querySelectorAll('#sec-view button').forEach(b => b.addEventListener('click', () => { sView = b.dataset.v; document.querySelectorAll('#sec-view button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); }));
+// pressure colours: suction (air speeding up) blue → cyan, pressure (air slowing) amber → red
+const CP_NEG = [[38, 52, 70], [32, 92, 170], [70, 170, 235], [190, 240, 255]], CP_POS = [[38, 52, 70], [170, 110, 60], [235, 150, 60], [255, 220, 150]];
+const ramp = (st_, t) => { t = clamp(t, 0, 1) * (st_.length - 1); const i = Math.min(st_.length - 2, Math.floor(t)), f = t - i, a = st_[i], b = st_[i + 1]; return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]; };
+function arrow(x0, y0, x1, y1, col, w) { const a = Math.atan2(y1 - y0, x1 - x0), h = 4 + 2.2 * w; sx.strokeStyle = sx.fillStyle = col; sx.lineWidth = w; sx.beginPath(); sx.moveTo(x0, y0); sx.lineTo(x1 - Math.cos(a) * h * 0.6, y1 - Math.sin(a) * h * 0.6); sx.stroke(); sx.beginPath(); sx.moveTo(x1, y1); sx.lineTo(x1 - h * Math.cos(a - 0.45), y1 - h * Math.sin(a - 0.45)); sx.lineTo(x1 - h * Math.cos(a + 0.45), y1 - h * Math.sin(a + 0.45)); sx.closePath(); sx.fill(); }
+function tag(text, x, y, col, align = 'left') { sx.font = `500 ${11 * dprS}px Figtree, system-ui, sans-serif`; sx.textAlign = align; sx.textBaseline = 'middle'; const w = sx.measureText(text).width, p = 4 * dprS; let x0 = align === 'left' ? x : align === 'right' ? x - w : x - w / 2;
+  x0 = clamp(x0, p + 2, secCv.width - w - p - 2); y = clamp(y, 10 * dprS, secCv.height - 10 * dprS); x = align === 'left' ? x0 : align === 'right' ? x0 + w : x0 + w / 2;
+  sx.fillStyle = 'rgba(8,14,22,.62)'; sx.beginPath(); sx.roundRect ? sx.roundRect(x0 - p, y - 8 * dprS, w + 2 * p, 16 * dprS, 4 * dprS) : sx.rect(x0 - p, y - 8 * dprS, w + 2 * p, 16 * dprS); sx.fill(); sx.fillStyle = col; sx.fillText(text, x, y); }
+let dprS = 1;
 function drawSection() {
-  if (!sField) return;
-  const W = secCv.clientWidth, H = secCv.clientHeight, dpr = Math.min(2, window.devicePixelRatio || 1);
-  if (secCv.width !== Math.round(W * dpr)) { secCv.width = Math.round(W * dpr); secCv.height = Math.round(H * dpr); }
-  const { ux, uy, dye } = sField, d = sImg.data;
+  if (!sField || !sMask) return;
+  const W = secCv.clientWidth, H = secCv.clientHeight, dpr = dprS = Math.min(2, window.devicePixelRatio || 1);
+  if (!W || !H) return;
+  if (secCv.width !== Math.round(W * dpr) || secCv.height !== Math.round(H * dpr)) { secCv.width = Math.round(W * dpr); secCv.height = Math.round(H * dpr); }
+  const { ux, uy, dye, rho } = sField, d = sImg.data, q = 1.5 * SU0 * SU0;
   for (let y = 0; y < SNY; y++) for (let x = 0; x < SNX; x++) {
-    const k = y * SNX + x, o = ((SNY - 1 - y) * SNX + x) * 4;
-    if (sMask[k]) { d[o] = 200; d[o + 1] = 208; d[o + 2] = 218; d[o + 3] = 255; continue; }
-    const s = clamp(Math.hypot(ux[k], uy[k]) / SU0 / 1.7, 0, 1), dy = clamp(dye[k] * 1.4, 0, 1), r = 8 + 60 * s * s, g = 22 + 110 * s, b = 40 + 140 * s;
-    d[o] = r + (245 - r) * dy; d[o + 1] = g + (248 - g) * dy; d[o + 2] = b + (252 - b) * dy; d[o + 3] = 255;
+    let k = y * SNX + x; const o = ((SNY - 1 - y) * SNX + x) * 4;
+    if (sMask[k]) { // fill the body with nearby fluid so the smooth outline has no dark halo
+      let kk = -1; for (let r = 1; r < 6 && kk < 0; r++) for (const [a, b] of [[0, r], [0, -r], [r, 0], [-r, 0]]) { const j = (y + b) * SNX + x + a; if (j >= 0 && j < SNX * SNY && !sMask[j]) { kk = j; break; } }
+      if (kk < 0) { d[o] = 38; d[o + 1] = 52; d[o + 2] = 70; d[o + 3] = 255; continue; } k = kk;
+    }
+    let c;
+    if (sView === 'p') { const cp = (rho[k] - 1) / q; c = cp < 0 ? ramp(CP_NEG, Math.sqrt(-cp / 2)) : ramp(CP_POS, Math.sqrt(cp)); }
+    else c = SL.mapRGB('viridis', Math.hypot(ux[k], uy[k]) / SU0 / 1.8);
+    const dy = clamp(dye[k] * 1.5, 0, 1) * (sView === 'p' ? 0.32 : 0.6);
+    d[o] = c[0] + (245 - c[0]) * dy; d[o + 1] = c[1] + (248 - c[1]) * dy; d[o + 2] = c[2] + (252 - c[2]) * dy; d[o + 3] = 255;
   }
   sfx.putImageData(sImg, 0, 0);
-  const cx0 = 0.22 * SNX - 0.3 * SL_, cw = 1.9 * SL_, ch = cw * secCv.height / secCv.width, cy0 = SNY / 2 - ch / 2;
-  sx.imageSmoothingEnabled = true; sx.drawImage(sFieldC, cx0, SNY - cy0 - ch, cw, ch, 0, 0, secCv.width, secCv.height);
-  if (sPolys.length > 1) { const toS = ([x, y]) => [(x - cx0) / cw * secCv.width, (1 - (y - cy0) / ch) * secCv.height]; sx.beginPath(); sPolys[1].forEach((p, i) => { const [a, b] = toS(p); i ? sx.lineTo(a, b) : sx.moveTo(a, b); }); sx.closePath(); sx.fillStyle = '#eef8ff'; sx.fill(); }
-  const cl = SL.mean(sHist, 40), s = SL.section(), th = 2 * Math.PI * (st.alpha - SL.alpha0(s.m / 100, s.p / 10, 0)), sep = st.alpha / D2R > 9 && sHist.length > 30 && cl < 0.62 * th;
-  $('sec-note').textContent = sep ? 'flow separated' : `angle ${fmt(st.alpha / D2R, 1)}°`; $('sec-note').style.color = sep ? 'var(--bad)' : '';
+  // viewport in grid cells: about 2 chords wide around the section
+  const cw = 1.75 * SL_, ch = cw * secCv.height / secCv.width, cx0 = sGeom(0).px - 0.25 * SL_ - 0.3 * SL_, cy0 = sGeom(0).py - ch * 0.5;
+  const toS = ([x, y]) => [(x - cx0) / cw * secCv.width, (1 - (y - cy0) / ch) * secCv.height], sc = secCv.width / cw;
+  sx.imageSmoothingEnabled = true; sx.imageSmoothingQuality = 'high'; sx.drawImage(sFieldC, cx0, SNY - cy0 - ch, cw, ch, 0, 0, secCv.width, secCv.height);
+  const path = poly => { sx.beginPath(); poly.forEach((p, i) => { const [a, b] = toS(p); i ? sx.lineTo(a, b) : sx.moveTo(a, b); }); sx.closePath(); };
+  // wing (and ice) as smooth vector shapes
+  path(sPolys[0]); const gr = sx.createLinearGradient(0, toS([0, sGeom(0).py + 0.1 * SL_])[1], 0, toS([0, sGeom(0).py - 0.1 * SL_])[1]); gr.addColorStop(0, '#c9d3de'); gr.addColorStop(1, '#8e9aa8'); sx.fillStyle = gr; sx.fill(); sx.lineWidth = 1.2 * dpr; sx.strokeStyle = 'rgba(255,255,255,.85)'; sx.stroke();
+  if (sPolys.length > 1) { path(sPolys[1]); sx.fillStyle = st.kind === 'glaze' ? 'rgba(200,235,255,.9)' : '#f2f8ff'; sx.fill(); sx.strokeStyle = 'rgba(160,200,230,.9)'; sx.lineWidth = dpr; sx.stroke(); }
+  // chord line and angle of attack
+  const tf = secTf(sAl), le = toS(tf([0, 0])), te = toS(tf([1, 0]));
+  sx.setLineDash([4 * dpr, 4 * dpr]); sx.strokeStyle = 'rgba(255,255,255,.45)'; sx.lineWidth = dpr; sx.beginPath(); sx.moveTo(le[0] - 0.12 * SL_ * sc * Math.cos(sAl * D2R), le[1] - 0.12 * SL_ * sc * Math.sin(sAl * D2R)); sx.lineTo(te[0], te[1]); sx.stroke(); sx.setLineDash([]);
+  const ay = 14 * dpr + 8 * dpr; arrow(10 * dpr, ay, 10 * dpr + 0.34 * SL_ * sc, ay, 'rgba(255,255,255,.9)', 2 * dpr); tag(`airflow  ${fmt(st.alpha / D2R, 1)}°`, 16 * dpr + 0.34 * SL_ * sc, ay, '#e8eef5');
+  // simulated lift: arrow at the quarter chord, perpendicular to the airflow
+  const cl = SL.mean(sHist, 40), qc = toS(tf([0.25, sShape.sh.up(0.25)]));
+  if (sHist.length > 20) { const Lp = clamp(cl, -0.6, 2.2) * 0.32 * SL_ * sc; if (Math.abs(Lp) > 3 * dpr) { arrow(qc[0], qc[1] - 4 * dpr, qc[0], qc[1] - 4 * dpr - Lp, '#ffd36a', 3 * dpr); tag(`lift ${fmt(cl, 2)}`, qc[0] + 7 * dpr, qc[1] - 4 * dpr - Lp + 6 * dpr, '#ffd36a'); } }
+  // stagnation point: highest pressure next to the nose
+  let best = -1e9, sp = null; for (const p of sPolys[0]) { const [gx, gy] = p; if (Math.hypot(gx - tf([0, 0])[0], gy - tf([0, 0])[1]) > 0.12 * SL_) continue; const k = (Math.round(gy) * SNX + Math.round(gx - 2)); const r = rho[k] || 0; if (!sMask[k] && r > best) { best = r; sp = p; } }
+  if (sp && sView === 'p') { const [a, b] = toS(sp); sx.fillStyle = '#ffb05a'; sx.beginPath(); sx.arc(a, b, 3.5 * dpr, 0, 7); sx.fill(); tag('stagnation', a - 4 * dpr, b + 16 * dpr, '#ffcf9a', 'center'); }
+  // separation: first point along the upper surface (aft of 5% chord) where the air next to it flows backwards
+  const cd = [Math.cos(-sAl * D2R), Math.sin(-sAl * D2R)]; let sepX = 1;
+  for (let i = 0; i < sShape.up.length; i++) {
+    const x = 0.5 * (1 - Math.cos(Math.PI * i / 120)); if (x < 0.05 || x > 0.97) continue;
+    const [gx, gy] = sShape.up[i], nX = -cd[1], nY = cd[0];   // surface normal ≈ chord normal
+    let rev = 0; for (const h of [2, 3.5]) { const k = Math.round(gy + nY * h) * SNX + Math.round(gx + nX * h); if (!sMask[k] && ux[k] * cd[0] + uy[k] * cd[1] < -0.02 * SU0) rev++; }
+    if (rev === 2) { sepX = x; break; }
+  }
+  sSep += (sepX - sSep) * 0.15;
+  const separated = sSep < 0.75;
+  if (separated) { const i = Math.round(Math.acos(1 - 2 * clamp(sSep, 0, 1)) / Math.PI * 120), [a, b] = toS(sShape.up[clamp(i, 0, 120)]); sx.fillStyle = '#ff6b5e'; sx.beginPath(); sx.arc(a, b, 4 * dpr, 0, 7); sx.fill(); tag(sSep < 0.2 ? 'separated from the nose' : `separates at ${Math.round(sSep * 100)}% chord`, a + 6 * dpr, b - 15 * dpr, '#ffa59c'); }
+  else if (sView === 'p' && sHist.length > 20 && cl > 0.15) { const p = toS(tf([0.72, sShape.sh.up(0.72) + 0.14])); tag('low pressure', p[0], p[1], '#a9dcff', 'center'); const p2 = toS(tf([0.62, sShape.sh.lo(0.62) - 0.14])); tag('high pressure', p2[0], p2[1], '#ffd2a0', 'center'); }
+  // legend
+  const lx = secCv.width - 118 * dpr, ly = secCv.height - 14 * dpr, lw = 100 * dpr, lg = sx.createLinearGradient(lx, 0, lx + lw, 0);
+  if (sView === 'p') { [[0, CP_NEG[3]], [0.33, CP_NEG[2]], [0.62, CP_NEG[0]], [0.82, CP_POS[2]], [1, CP_POS[3]]].forEach(([t, c]) => lg.addColorStop(t, `rgb(${c.map(Math.round)})`)); }
+  else for (let t = 0; t <= 1; t += 0.25) lg.addColorStop(t, `rgb(${SL.mapRGB('viridis', t).join(',')})`);
+  sx.fillStyle = 'rgba(8,14,22,.6)'; sx.fillRect(lx - 6 * dpr, ly - 18 * dpr, lw + 12 * dpr, 26 * dpr); sx.fillStyle = lg; sx.fillRect(lx, ly - 2 * dpr, lw, 6 * dpr);
+  sx.font = `500 ${9.5 * dpr}px Figtree, system-ui, sans-serif`; sx.fillStyle = '#cfd8e2'; sx.textBaseline = 'alphabetic'; sx.textAlign = 'left'; sx.fillText(sView === 'p' ? 'suction' : 'slow', lx, ly - 6 * dpr); sx.textAlign = 'right'; sx.fillText(sView === 'p' ? 'pressure' : 'fast', lx + lw, ly - 6 * dpr);
+  // header note and caption
+  $('sec-note').textContent = separated ? (sSep < 0.2 ? 'stalled' : 'flow separating') : 'attached flow'; $('sec-note').style.color = separated ? 'var(--bad)' : 'var(--good)';
+  const capKey = separated ? 'sep' : sPolys.length > 1 ? 'ice' : 'ok';
+  if (drawSection.cap !== capKey) { drawSection.cap = capKey; $('sec-cap').innerHTML = capKey === 'sep' ? 'The air can no longer follow the top surface. It breaks away into a swirling wake, the suction collapses and lift falls: a stall.'
+    : capKey === 'ice' ? 'Ice has reshaped the leading edge. The air trips over it, separates sooner, and the wing stalls at a lower angle.'
+    : 'Air speeds up over the top and its pressure drops (blue); underneath it slows and pressure rises (orange). The difference is lift. Simulated live at reduced scale.'; }
 }
 
 // ====================================================== controls
@@ -655,7 +737,7 @@ function loop(now) {
 }
 window.SLIP = { S, AP, get st() { return st; }, get corner() { return corner; }, setMode, setAircraft, setView };   // console/debug access
 (async () => {
-  CAT = await (await fetch('models/catalog.json?v=8')).json();
+  CAT = await (await fetch('models/catalog.json?v=9')).json();
   for (const [k, m] of Object.entries(CAT)) SL.PROJECTS[k] = { name: m.short, wing: m.wing, tail: m.tail, body: m.body, mass: m.mass, cg: m.cg, engine: m.engine, flight: m.flight };
   refreshEnv(); renderExp(); setView('chase');
   await setAircraft('c172');

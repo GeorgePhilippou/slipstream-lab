@@ -6,13 +6,13 @@
   "desc": "The world's most-built aircraft: a high-wing, four-seat trainer.",
   "source": "FlightGear c172p (c172p-team), GPL-2.0",
   "file": "models/c172.slm3",
-  "tris": 25465,
+  "tris": 25881,
   "wing": {
    "b": 11.0,
    "cr": 1.913,
    "taper": 0.54,
-   "sweep": -0.7,
-   "dihedral": 4.7,
+   "sweep": -1.1,
+   "dihedral": 4.8,
    "twist": -3,
    "inc": 1.5,
    "sec": "2412",
@@ -31,10 +31,10 @@
    "tsweep": 5
   },
   "body": {
-   "lf": 7.98,
+   "lf": 8.23,
    "df": 1.15,
-   "xnose": -1.68,
-   "zc": 0.3
+   "xnose": -1.95,
+   "zc": 0.31
   },
   "mass": 1043,
   "cg": 25,
@@ -55,12 +55,12 @@
   "desc": "Elliptical wing, Merlin engine, 1940s fighter.",
   "source": "FlightGear SpitfireIX (FGMEMBERS), GPL-2.0",
   "file": "models/spitfire.slm3",
-  "tris": 8615,
+  "tris": 8867,
   "wing": {
    "b": 11.23,
    "cr": 2.86,
    "taper": 0.4,
-   "sweep": 4.2,
+   "sweep": 4.3,
    "dihedral": 5.3,
    "twist": -2,
    "inc": 2,
@@ -80,10 +80,10 @@
    "tsweep": 8
   },
   "body": {
-   "lf": 9.62,
+   "lf": 9.23,
    "df": 1.05,
-   "xnose": -2.09,
-   "zc": 1.32
+   "xnose": -1.69,
+   "zc": 1.36
   },
   "mass": 3400,
   "cg": 25,
@@ -153,7 +153,7 @@
   "desc": "Twin-engine narrow-body airliner with fly-by-wire controls.",
   "source": "FlightGear A320-family (legoboyvdlp), GPL-2.0",
   "file": "models/a320.slm3",
-  "tris": 57435,
+  "tris": 57515,
   "wing": {
    "b": 34.1,
    "cr": 5.752,
