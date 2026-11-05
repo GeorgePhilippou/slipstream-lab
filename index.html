@@ -68,6 +68,10 @@ button, input, select { font: inherit; color: inherit; }
 /* experiments */
 .exp { grid-area: left; align-self: start; padding: 16px; display: flex; flex-direction: column; gap: 12px; max-height: 100%; overflow: auto; }
 .exp h2 { margin: 0; font: 600 16px/1.2 var(--f-display); }
+.ac-card { display: flex; flex-direction: column; gap: 3px; padding-bottom: 12px; border-bottom: 1px solid var(--edge); }
+.ac-card b { font: 600 17px/1.2 var(--f-display); }
+.ac-card span { color: var(--ink-2); font-size: 13px; }
+.ac-card small { color: var(--ink-3); font-size: 11.5px; }
 .exp .lede { margin: 0; color: var(--ink-2); font-size: 13px; }
 .exp-list { display: flex; flex-direction: column; gap: 6px; }
 .exp-item { display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: center; text-align: left; background: var(--glass-2); border: 1px solid transparent; border-radius: 10px; padding: 9px 10px; cursor: pointer; }
@@ -164,10 +168,10 @@ input[type=range]:disabled { opacity: .35; }
   <header class="top">
     <div class="brand card">Slipstream<small>Fly a wing. Watch the air.</small></div>
     <div class="chips card" id="aircraft" role="group" aria-label="Aircraft">
-      <button class="chip" data-k="trainer" aria-pressed="true">Light trainer</button>
-      <button class="chip" data-k="glider" aria-pressed="false">Sailplane</button>
-      <button class="chip" data-k="turboprop" aria-pressed="false">Turboprop</button>
-      <button class="chip" data-k="airliner" aria-pressed="false">Airliner</button>
+      <button class="chip" data-k="c172" aria-pressed="true">Cessna 172</button>
+      <button class="chip" data-k="spitfire" aria-pressed="false">Spitfire</button>
+      <button class="chip" data-k="b738" aria-pressed="false">Boeing 737</button>
+      <button class="chip" data-k="a320" aria-pressed="false">Airbus A320</button>
     </div>
     <div class="grow"></div>
     <div class="views card" id="views" role="group" aria-label="Camera">
@@ -176,6 +180,7 @@ input[type=range]:disabled { opacity: .35; }
       <button data-v="front" aria-pressed="false">Front</button>
       <button data-v="top" aria-pressed="false">Above</button>
       <button data-v="tip" aria-pressed="false">Wingtip</button>
+      <button data-v="close" aria-pressed="false">Close-up</button>
     </div>
     <a class="link card" href="lab.html">Engineering view</a>
   </header>
@@ -194,10 +199,13 @@ input[type=range]:disabled { opacity: .35; }
         <div class="mini"><div class="k">Wing angle</div><div class="v" id="g-a">—</div></div>
         <div class="mini"><div class="k">Lift ÷ drag</div><div class="v" id="g-ld">—</div></div>
         <div class="mini"><div class="k">Ice</div><div class="v" id="g-ice">—</div></div>
+        <div class="mini"><div class="k">Snow / frost</div><div class="v" id="g-snow">—</div></div>
+        <div class="mini"><div class="k">Outside air</div><div class="v" id="g-oat">—</div></div>
+        <div class="mini"><div class="k">Stall speed</div><div class="v" id="g-vstall">—</div></div>
       </div>
     </div>
     <div class="section card">
-      <h3>Inside the wing's airflow <span id="sec-note">live 2D simulation</span></h3>
+      <h3>Wing cross-section <span id="sec-note">live 2D simulation</span></h3>
       <canvas id="sec" aria-label="Cross-section of the wing with simulated airflow"></canvas>
       <p id="sec-cap">A slice through your wing at the same angle. White smoke shows the air; watch it peel away from the top surface in a stall.</p>
     </div>
@@ -205,7 +213,8 @@ input[type=range]:disabled { opacity: .35; }
 
   <section class="dock card" aria-label="Controls">
     <div class="grp"><span class="gl">Mode</span>
-      <div class="seg" id="mode" role="group" aria-label="Mode"><button data-v="fly" aria-pressed="true">Fly</button><button data-v="tunnel" aria-pressed="false">Wind tunnel</button></div>
+      <div class="seg" id="mode" role="group" aria-label="Mode"><button data-v="fly" aria-pressed="true">Fly</button><button data-v="tunnel" aria-pressed="false">Wind tunnel</button><button data-v="park" aria-pressed="false">Parked</button></div>
+      <button class="btn primary" id="c-takeoff" type="button" hidden>Take off</button>
     </div>
     <div class="sep"></div>
     <div class="grp"><span class="gl">Flight</span>
@@ -216,29 +225,30 @@ input[type=range]:disabled { opacity: .35; }
       </div>
     </div>
     <div class="sep"></div>
-    <div class="grp"><span class="gl">Wing</span>
+    <div class="grp"><span class="gl">Weather</span>
       <div class="ctls">
-        <div class="sl"><label for="c-span">Span</label><output id="c-span-o"></output><input type="range" id="c-span"></div>
-        <div class="sl"><label for="c-sweep">Sweep</label><output id="c-sweep-o"></output><input type="range" id="c-sweep" min="-25" max="45" step="1"></div>
-        <label class="tg"><input type="checkbox" id="c-wl">Winglets</label>
+        <div class="seg" id="wx" role="group" aria-label="Weather"><button data-v="clear" aria-pressed="true">Clear</button><button data-v="cloud" aria-pressed="false">Icing cloud</button><button data-v="frz" aria-pressed="false">Freezing rain</button><button data-v="snow" aria-pressed="false">Snow</button><button data-v="frost" aria-pressed="false">Frost</button></div>
+        <div class="sl"><label for="c-dt">Temperature</label><output id="c-dt-o"></output><input type="range" id="c-dt" min="-20" max="20" step="1" value="0" aria-describedby="dt-h"></div>
+        <button class="btn" id="c-deice" type="button">De-ice</button>
+        <div class="seg" id="c-time" role="group" aria-label="Time speed"><button data-v="1" aria-pressed="true">1×</button><button data-v="10" aria-pressed="false">10×</button><button data-v="60" aria-pressed="false">60×</button></div>
       </div>
     </div>
     <div class="sep"></div>
-    <div class="grp"><span class="gl">Weather</span>
+    <div class="grp"><span class="gl">Show</span>
       <div class="ctls">
-        <label class="tg"><input type="checkbox" id="c-cloud">Fly in cloud</label>
-        <button class="btn" id="c-deice" type="button">De-ice</button>
-        <div class="seg" id="c-time" role="group" aria-label="Time speed"><button data-v="1" aria-pressed="true">1×</button><button data-v="10" aria-pressed="false">10×</button><button data-v="60" aria-pressed="false">60×</button></div>
+        <label class="tg"><input type="checkbox" id="t-trails" checked>Vortex trails</label>
+        <label class="tg"><input type="checkbox" id="t-smoke">Airflow smoke</label>
+        <label class="tg"><input type="checkbox" id="t-lift">Lift map</label>
       </div>
     </div>
   </section>
 </div>
 
 <script src="vendor/three-0.149.0.min.js"></script>
-<script src="core.js?v=6"></script>
-<script src="geom.js?v=6"></script>
-<script src="vlm.js?v=6"></script>
-<script src="aero.js?v=6"></script>
-<script src="fly.js?v=6"></script>
+<script src="core.js?v=8"></script>
+<script src="geom.js?v=8"></script>
+<script src="vlm.js?v=8"></script>
+<script src="aero.js?v=8"></script>
+<script src="fly.js?v=8"></script>
 </body>
 </html>

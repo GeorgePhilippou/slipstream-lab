@@ -93,7 +93,7 @@ SL.PROJECTS = {
   swept: merge(BASE, { name: 'Swept wing, no twist', wing: { sweep: 35, taper: 0.3, twist: 0, dihedral: 0, cr: 2.3 } }),
   forward: merge(BASE, { name: 'Forward-swept wing', wing: { sweep: -25, taper: 0.5, twist: 0, dihedral: 0, cr: 2.0 } }),
 };
-SL.AIRFOILS = { '0009': [0, 0, 9], '0012': [0, 0, 12], '2412': [2, 4, 12], '2415': [2, 4, 15], '4412': [4, 4, 12], '4415': [4, 4, 15], '6409': [6, 4, 9] };
+SL.AIRFOILS = { '2213': [2, 2, 13], '0009': [0, 0, 9], '0012': [0, 0, 12], '2412': [2, 4, 12], '2415': [2, 4, 15], '4412': [4, 4, 12], '4415': [4, 4, 15], '6409': [6, 4, 9] };
 SL.P = deep(BASE);
 SL.version = 0;
 SL.loadProject = key => { SL.P = deep(SL.PROJECTS[key]); SL.version++; SL.emit('project', { full: true }); };

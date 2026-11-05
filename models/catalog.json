@@ -1,0 +1,198 @@
+{
+ "c172": {
+  "name": "Cessna 172 Skyhawk",
+  "short": "Cessna 172",
+  "cls": "Light trainer",
+  "desc": "The world's most-built aircraft: a high-wing, four-seat trainer.",
+  "source": "FlightGear c172p (c172p-team), GPL-2.0",
+  "file": "models/c172.slm3",
+  "tris": 25465,
+  "wing": {
+   "b": 11.0,
+   "cr": 1.913,
+   "taper": 0.54,
+   "sweep": -0.7,
+   "dihedral": 4.7,
+   "twist": -3,
+   "inc": 1.5,
+   "sec": "2412",
+   "flapSpan": 0.6,
+   "flap": 0,
+   "wlH": 0,
+   "wlCant": 75
+  },
+  "tail": {
+   "on": true,
+   "bt": 3.45,
+   "ct": 1.05,
+   "lt": 5.0,
+   "zt": -0.25,
+   "it": -2,
+   "tsweep": 5
+  },
+  "body": {
+   "lf": 7.98,
+   "df": 1.15,
+   "xnose": -1.68,
+   "zc": 0.3
+  },
+  "mass": 1043,
+  "cg": 25,
+  "engine": {
+   "type": "prop",
+   "power": 119,
+   "thrust": 0
+  },
+  "flight": {
+   "h": 2500,
+   "V": 55
+  }
+ },
+ "spitfire": {
+  "name": "Supermarine Spitfire Mk IX",
+  "short": "Spitfire",
+  "cls": "Second World War fighter",
+  "desc": "Elliptical wing, Merlin engine, 1940s fighter.",
+  "source": "FlightGear SpitfireIX (FGMEMBERS), GPL-2.0",
+  "file": "models/spitfire.slm3",
+  "tris": 8615,
+  "wing": {
+   "b": 11.23,
+   "cr": 2.86,
+   "taper": 0.4,
+   "sweep": 4.2,
+   "dihedral": 5.3,
+   "twist": -2,
+   "inc": 2,
+   "sec": "2213",
+   "flapSpan": 0.6,
+   "flap": 0,
+   "wlH": 0,
+   "wlCant": 75
+  },
+  "tail": {
+   "on": true,
+   "bt": 3.3,
+   "ct": 1.25,
+   "lt": 6.2,
+   "zt": 0.55,
+   "it": -1.5,
+   "tsweep": 8
+  },
+  "body": {
+   "lf": 9.62,
+   "df": 1.05,
+   "xnose": -2.09,
+   "zc": 1.32
+  },
+  "mass": 3400,
+  "cg": 25,
+  "engine": {
+   "type": "prop",
+   "power": 1170,
+   "thrust": 0
+  },
+  "flight": {
+   "h": 4000,
+   "V": 130
+  }
+ },
+ "b738": {
+  "name": "Boeing 737-800",
+  "short": "Boeing 737",
+  "cls": "Narrow-body airliner",
+  "desc": "Twin-engine narrow-body airliner with blended winglets.",
+  "source": "FlightGear 737-800 (FGMEMBERS), GPL-2.0",
+  "file": "models/b738.slm3",
+  "tris": 15136,
+  "wing": {
+   "b": 34.3,
+   "cr": 5.859,
+   "taper": 0.24,
+   "sweep": 24.9,
+   "dihedral": 6.4,
+   "twist": -3,
+   "inc": 1.5,
+   "sec": "2412",
+   "flapSpan": 0.6,
+   "flap": 0,
+   "wlH": 0,
+   "wlCant": 75
+  },
+  "tail": {
+   "on": true,
+   "bt": 14.35,
+   "ct": 3.6,
+   "lt": 18.5,
+   "zt": 1.5,
+   "it": -2,
+   "tsweep": 30
+  },
+  "body": {
+   "lf": 39.42,
+   "df": 3.76,
+   "xnose": -14.37,
+   "zc": -0.38
+  },
+  "mass": 65000,
+  "cg": 25,
+  "engine": {
+   "type": "jet",
+   "power": 0,
+   "thrust": 242
+  },
+  "flight": {
+   "h": 4500,
+   "V": 130
+  }
+ },
+ "a320": {
+  "name": "Airbus A320",
+  "short": "Airbus A320",
+  "cls": "Narrow-body airliner",
+  "desc": "Twin-engine narrow-body airliner with fly-by-wire controls.",
+  "source": "FlightGear A320-family (legoboyvdlp), GPL-2.0",
+  "file": "models/a320.slm3",
+  "tris": 57435,
+  "wing": {
+   "b": 34.1,
+   "cr": 5.752,
+   "taper": 0.25,
+   "sweep": 24.3,
+   "dihedral": 6.0,
+   "twist": -3,
+   "inc": 1.5,
+   "sec": "2412",
+   "flapSpan": 0.6,
+   "flap": 0,
+   "wlH": 0,
+   "wlCant": 75
+  },
+  "tail": {
+   "on": true,
+   "bt": 12.45,
+   "ct": 3.4,
+   "lt": 17.5,
+   "zt": 1.8,
+   "it": -2,
+   "tsweep": 29
+  },
+  "body": {
+   "lf": 37.61,
+   "df": 3.95,
+   "xnose": -11.83,
+   "zc": -0.79
+  },
+  "mass": 64000,
+  "cg": 25,
+  "engine": {
+   "type": "jet",
+   "power": 0,
+   "thrust": 240
+  },
+  "flight": {
+   "h": 4500,
+   "V": 130
+  }
+ }
+}
