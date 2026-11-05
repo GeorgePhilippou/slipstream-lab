@@ -111,11 +111,28 @@ button, input, select { font: inherit; color: inherit; }
 .section { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
 .section h3 { margin: 0; font: 600 13px/1.2 var(--f-display); display: flex; justify-content: space-between; gap: 8px; }
 .section h3 span { font: 400 11.5px var(--f-text); color: var(--ink-3); }
-#sec { width: 100%; aspect-ratio: 1.9 / 1; border-radius: 8px; display: block; background: #071019; }
+#sec { width: 100%; aspect-ratio: 2 / 1; border-radius: 8px; display: block; background: #071019; }
 .sec-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 #sec-name { font-size: 11.5px; color: var(--ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .seg.mini-seg button { padding: 3px 8px; font-size: 11.5px; }
-.section p { margin: 0; font-size: 12px; color: var(--ink-2); }
+.section p { margin: 0; font-size: 11.5px; line-height: 1.4; color: var(--ink-2); }
+
+/* motion: gentle fades for messages and state changes */
+@keyframes toastIn { from { opacity: 0; transform: translate(-50%, -44%); } to { opacity: 1; transform: translate(-50%, -50%); } }
+#toast:not([hidden]) { animation: toastIn .28s ease-out; }
+#banner:not([hidden]) { animation: fadeIn .2s ease; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.state, .wxs, .bar i { transition: background-color .35s ease, color .35s ease, box-shadow .35s ease, width .3s ease; }
+.wxs > * { animation: fadeIn .3s ease; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* weather status line */
+.wxs { display: flex; align-items: center; gap: 10px; min-height: 30px; padding: 5px 6px 5px 10px; border-radius: 9px; background: rgba(255,255,255,.05); font-size: 12.5px; color: var(--ink-2); max-width: 760px; }
+.wxs b { color: var(--ink); font-weight: 600; }
+.wxs.good { background: rgba(120,200,255,.12); box-shadow: inset 3px 0 0 #8fd3ff; }
+.wxs.warn { background: rgba(255,207,90,.11); box-shadow: inset 3px 0 0 var(--warn); }
+.wxs span { flex: 1; min-width: 0; }
+.btn.sm { padding: 4px 10px; font-size: 12px; white-space: nowrap; }
 
 /* dock */
 .dock { grid-area: dock; padding: 12px 16px; display: flex; gap: 18px 22px; align-items: center; flex-wrap: wrap; }
@@ -232,10 +249,11 @@ input[type=range]:disabled { opacity: .35; }
     <div class="grp"><span class="gl">Weather</span>
       <div class="ctls">
         <div class="seg" id="wx" role="group" aria-label="Weather"><button data-v="clear" aria-pressed="true">Clear</button><button data-v="cloud" aria-pressed="false">Icing cloud</button><button data-v="frz" aria-pressed="false">Freezing rain</button><button data-v="snow" aria-pressed="false">Snow</button><button data-v="frost" aria-pressed="false">Frost</button></div>
-        <div class="sl"><label for="c-dt">Temperature</label><output id="c-dt-o"></output><input type="range" id="c-dt" min="-20" max="20" step="1" value="0" aria-describedby="dt-h"></div>
+        <div class="sl"><label for="c-dt">Outside air</label><output id="c-dt-o"></output><input type="range" id="c-dt" min="-35" max="25" step="1" value="0"></div>
         <button class="btn" id="c-deice" type="button">De-ice</button>
         <div class="seg" id="c-time" role="group" aria-label="Time speed"><button data-v="1" aria-pressed="true">1×</button><button data-v="10" aria-pressed="false">10×</button><button data-v="60" aria-pressed="false">60×</button></div>
       </div>
+      <div class="wxs" id="wx-status" role="status" aria-live="polite"></div>
     </div>
     <div class="sep"></div>
     <div class="grp"><span class="gl">Show</span>
@@ -243,16 +261,17 @@ input[type=range]:disabled { opacity: .35; }
         <label class="tg"><input type="checkbox" id="t-trails" checked>Vortex trails</label>
         <label class="tg"><input type="checkbox" id="t-smoke">Airflow smoke</label>
         <label class="tg"><input type="checkbox" id="t-lift">Lift map</label>
+        <label class="tg"><input type="checkbox" id="t-icehl">Highlight ice</label>
       </div>
     </div>
   </section>
 </div>
 
 <script src="vendor/three-0.149.0.min.js"></script>
-<script src="core.js?v=9"></script>
-<script src="geom.js?v=9"></script>
-<script src="vlm.js?v=9"></script>
-<script src="aero.js?v=9"></script>
-<script src="fly.js?v=9"></script>
+<script src="core.js?v=10"></script>
+<script src="geom.js?v=10"></script>
+<script src="vlm.js?v=10"></script>
+<script src="aero.js?v=10"></script>
+<script src="fly.js?v=10"></script>
 </body>
 </html>

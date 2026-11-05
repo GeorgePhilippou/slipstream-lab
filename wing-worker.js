@@ -246,12 +246,12 @@ function loop() {
     do {
       collide(); stream(); n++; steps++;
       if (icing.on && steps > icing.settle) { dropsStep(); expSteps++; if ((steps & 3) === 0) runback(); if ((steps & 7) === 0) freezeCheck(); }
-    } while (performance.now() - t < 14 && n < 200);
+    } while (performance.now() - t < 10 && n < 200);   // ~10 ms of work, then rest: keeps one core near half load
     batch += n; advectDye(n);
     if (!stable()) { resetFlow(); postMessage({ type: 'blowup' }); }
   }
   if (want && N) post();
-  timer = setTimeout(loop, running ? 0 : 40);
+  timer = setTimeout(loop, running ? 8 : 60);
 }
 onmessage = e => {
   const m = e.data;

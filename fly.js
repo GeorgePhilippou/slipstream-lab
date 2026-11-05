@@ -5,8 +5,8 @@
 // snow and frost contamination; D2Q9 lattice Boltzmann for the live wing section (wing-worker.js).
 (() => {
 const { $, fmt, int, clamp, D2R } = SL;
-const G0 = 9.80665;
-const S = { key: 'c172', mode: 'fly', aoa: 4, view: 'chase', wx: 'clear', dT: 0, ts: 1, smoke: false, trails: true, liftmap: false };
+const G0 = 9.80665, VER = 10;   // VER busts browser caches of the model files
+const S = { key: 'c172', mode: 'fly', aoa: 4, view: 'chase', wx: 'clear', dT: 0, ts: 1, smoke: false, trails: true, liftmap: false, icehl: false };
 const WX = {
   clear: { name: 'Clear', lwc: 0, mvd: 0, precip: null },
   cloud: { name: 'Icing cloud', lwc: 0.5, mvd: 22, precip: 'cloud' },
@@ -33,6 +33,9 @@ const CDof = (CL, al, M, X) => { const x = (al - ac.alpha0) * X.aw / X.CLmax; re
 const Tmax = (rho, V, M) => { const sig = rho / 1.225; return ac.prop ? Math.min(ac.Tstatic * sig, ac.eta * ac.P * sig / Math.max(V, 20)) : ac.T0 * sig ** 0.85 * (1 - 0.25 * M); };
 const beta0 = V => { const w = WX[S.wx]; if (!w.mvd) return 0; const d = w.mvd * 1e-6, K = 1000 * d * d * Math.max(V, 1) / (9 * 1.7e-5 * 0.2 * ac.c); if (K <= 0.125) return 0; const z = 1.4 * Math.pow(K - 0.125, 0.84); return 0.85 * z / (1 + z); };
 const liquid = Tc => Tc >= 0 ? 0 : clamp((Tc + 40) / 25, 0, 1);
+const liquidFor = (wx, Tc) => wx === 'frz' ? (Tc < 0 && Tc > -12 ? 1 : 0) : WX[wx].lwc ? liquid(Tc) : 0;
+const iceRate = () => { const w = WX[S.wx], Tc = OAT(hNow()), lf = liquidFor(S.wx, Tc); if (lf <= 0 || st.V < 5 || S.mode === 'park') return 0;
+  const kd = SL.iceKind(Tc, w.lwc).key, kind = kd === 'none' ? 'rime' : (S.wx === 'frz' ? 'glaze' : kd); return beta0(st.V) * w.lwc * 1e-3 * st.V / (kind === 'rime' ? 880 : 917) * lf; };   // m/s of sim time
 function newState() {
   st = { h: AP.ht, V: AP.vt, gam: 0, alpha: 3 * D2R, k: 0, kind: 'rime', t: 0, mode: 'hold', recT: 0, stallH: 0, contam: 0, cType: 'snow', dk: 0 };
   const atm = SL.isa(st.h), X = aeroOf(0, 'rime', 0), q = 0.5 * atm.rho * st.V * st.V;
@@ -40,7 +43,7 @@ function newState() {
 }
 function rebuildAircraft() { ac = SL.aircraftFromProject(); acVer = SL.version; A = SL.aero(); }
 function accrete(dt) {   // stagnation-line ice growth (m), shared by the flight model and the surface ice
-  const Tc = OAT(hNow()), w = WX[S.wx], lf = w.lwc ? liquid(Tc) : 0;
+  const Tc = OAT(hNow()), w = WX[S.wx], lf = liquidFor(S.wx, Tc);
   if (lf <= 0 || st.V < 5) return;
   const kd = SL.iceKind(Tc, w.lwc).key; st.kind = kd === 'none' ? 'rime' : (S.wx === 'frz' ? 'glaze' : kd);
   const d = beta0(st.V) * w.lwc * 1e-3 * st.V / (st.kind === 'rime' ? 880 : 917) * lf * dt;
@@ -75,7 +78,7 @@ function outputs() {
 // ====================================================== renderer, sky, environment
 const canvas = $('scene');
 const R = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-R.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+R.setPixelRatio(Math.min(1.5, window.devicePixelRatio || 1));   // retina at 2× costs ~80% more GPU energy for little gain
 R.outputEncoding = THREE.sRGBEncoding; R.toneMapping = THREE.ACESFilmicToneMapping; R.toneMappingExposure = 0.95;
 R.physicallyCorrectLights = true;
 const scene = new THREE.Scene();
@@ -138,9 +141,9 @@ const snowMat = new THREE.MeshStandardMaterial({ vertexColors: true, transparent
 const cache = {};
 async function loadModel(key) {
   if (cache[key]) return cache[key];
-  const m = CAT[key]; let buf, r = await fetch(m.file).catch(() => null);
+  const m = CAT[key]; let buf, r = await fetch(m.file + '?v=' + VER).catch(() => null);
   if (r && r.ok && !(r.headers.get('content-type') || '').includes('text/html')) buf = await r.arrayBuffer();
-  else { r = await fetch(m.file + '.txt'); if (!r.ok) throw new Error('Could not load ' + m.file); const b = atob((await r.text()).trim()), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); buf = u.buffer; }
+  else { r = await fetch(m.file + '.txt?v=' + VER); if (!r.ok) throw new Error('Could not load ' + m.file); const b = atob((await r.text()).trim()), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); buf = u.buffer; }
   const dv = new DataView(buf); if (dv.getUint32(0, true) !== 0x334D4C53) throw new Error('Bad model file ' + m.file);
   const nt = dv.getUint32(4, true);
   return (cache[key] = { nt, pos: new Float32Array(buf, 8, nt * 9), nrm: new Int8Array(buf, 8 + nt * 36, nt * 9), part: new Uint8Array(buf, 8 + nt * 45, nt) });
@@ -155,7 +158,8 @@ function inWing(x, y, z) {
   return x > xl - 0.1 * c && x < xl + 1.1 * c && Math.abs(z - zw) < 0.2 * c + 0.05;
 }
 function buildModel(M) {
-  for (const m of meshes) { body.remove(m); m.geometry.dispose(); } meshes = [];
+  for (const m of meshes) { if (m.parent) m.parent.remove(m); m.geometry.dispose(); } meshes = [];
+  for (const h of props) body.remove(h);   // propeller holders too, or the previous aircraft's propeller stays behind
   const P = SL.P, pal = PAINT[S.key], ref = SL.geom.reference(P);
   xcg = ref.xcg; L_ref = Math.max(P.wing.b, P.body.lf);
   body.matrix.set(-1, 0, 0, xcg, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1); body.matrixWorldNeedsUpdate = true;
@@ -234,11 +238,11 @@ function surfaceUpdate(dt) {
   st.snowMean = mean;
   // write the visual layers (ice drawn 2× thicker so it reads at a distance; snow true scale ×1.5)
   const ip = iceGeo.attributes.position.array, icol = iceGeo.attributes.color.array, sp = snowGeo.attributes.position.array, scol = snowGeo.attributes.color.array;
-  const glaze = st.kind === 'glaze', iceCol = glaze ? [0.62, 0.8, 0.92] : [0.86, 0.92, 0.98];
-  iceMat.roughness = glaze ? 0.08 : 0.75; iceMat.emissive.setRGB(glaze ? 0.02 : 0.1, glaze ? 0.04 : 0.11, glaze ? 0.06 : 0.13); iceMat.clearcoat = glaze ? 1 : 0.15; iceMat.sheen = glaze ? 0 : 1;
-  let anyI = false, anyS = false;
+  const glaze = st.kind === 'glaze', hl = S.icehl, iceCol = hl ? [0.2, 0.85, 1.0] : glaze ? [0.62, 0.8, 0.92] : [0.86, 0.92, 0.98];
+  iceMat.roughness = glaze ? 0.08 : 0.75; if (hl) iceMat.emissive.setRGB(0.05, 0.42, 0.6); else iceMat.emissive.setRGB(glaze ? 0.04 : 0.17, glaze ? 0.07 : 0.19, glaze ? 0.1 : 0.22); iceMat.clearcoat = glaze ? 1 : 0.15; iceMat.sheen = glaze ? 0 : 1;
+  let anyI = false, anyS = false; const iceX = clamp(L_ref / 2.4, 4, 12);   // drawn thicker than real so it reads at viewing distance
   for (let v = 0; v < c.n; v++) {
-    const t = c.t[v] * 3, s = c.s[v] * 1.5, o = v * 3, q = v * 4;
+    const t = c.t[v] * iceX, s = c.s[v] * 1.5, o = v * 3, q = v * 4;
     ip[o] = c.pos[o] + c.nrm[o] * t; ip[o + 1] = c.pos[o + 1] + c.nrm[o + 1] * t; ip[o + 2] = c.pos[o + 2] + c.nrm[o + 2] * t;
     const ai = Math.pow(clamp(c.t[v] / 0.0006, 0, 1), 0.7) * (glaze ? 0.8 : 0.97); const gr = 0.82 + 0.18 * (c.noise[v] - 0.55) / 0.9; icol[q] = iceCol[0] * gr; icol[q + 1] = iceCol[1] * gr; icol[q + 2] = iceCol[2] * (0.9 + 0.1 * gr); icol[q + 3] = ai; if (ai > 0.04) anyI = true;
     const off = t + s + 0.0004;
@@ -271,7 +275,7 @@ function liftMap(off) {
 
 // ====================================================== flow field, wingtip-vortex trails and smoke
 let field = null, fieldBusy = false, fieldWant = null, fieldAlpha = 99, fieldVer = -1, box = null;
-const fw = new Worker('field-worker.js?v=9');
+const fw = new Worker('field-worker.js?v=10');
 fw.onmessage = e => { field = e.data; fieldBusy = false; buildTrails(); if (fieldWant) { const w = fieldWant; fieldWant = null; requestField(w.alpha); } };
 function requestField(alpha) {
   if (!A) return;
@@ -464,7 +468,7 @@ function sectionShape() {
   return { ...n, up: x => SL.naca.yc(n.m, n.p, x) + SL.naca.yt(n.t, x), lo: x => SL.naca.yc(n.m, n.p, x) - SL.naca.yt(n.t, x) };
 }
 const secCv = $('sec'), sx = secCv.getContext('2d');
-const SNX = 400, SNY = 180, SU0 = 0.12, SL_ = 84, sw = new Worker('wing-worker.js?v=9');
+const SNX = 400, SNY = 180, SU0 = 0.12, SL_ = 84, sw = new Worker('wing-worker.js?v=10');
 const sFieldC = document.createElement('canvas'); sFieldC.width = SNX; sFieldC.height = SNY; const sfx = sFieldC.getContext('2d'), sImg = sfx.createImageData(SNX, SNY);
 let sField = null, sMask = null, sPolys = [], sKey = '', sStarted = false, sHist = [], sShape = null, sAl = 0, sSep = 1, sView = 'p';
 const sGeom = al => ({ px: 0.24 * SNX + 0.25 * SL_, py: SNY / 2 + 6, L: SL_, aoa: al, ox: 0.25 });
@@ -514,12 +518,31 @@ function tag(text, x, y, col, align = 'left') { sx.font = `500 ${11 * dprS}px Fi
   x0 = clamp(x0, p + 2, secCv.width - w - p - 2); y = clamp(y, 10 * dprS, secCv.height - 10 * dprS); x = align === 'left' ? x0 : align === 'right' ? x0 + w : x0 + w / 2;
   sx.fillStyle = 'rgba(8,14,22,.62)'; sx.beginPath(); sx.roundRect ? sx.roundRect(x0 - p, y - 8 * dprS, w + 2 * p, 16 * dprS, 4 * dprS) : sx.rect(x0 - p, y - 8 * dprS, w + 2 * p, 16 * dprS); sx.fill(); sx.fillStyle = col; sx.fillText(text, x, y); }
 let dprS = 1;
+const SK = { rows: [], t: 0, key: '' };
+function streaks(dt, ux, uy, cx0, cy0, cw, ch) {
+  const nRows = 17, y0 = cy0 + 2, y1 = cy0 + ch - 2, speed = cw / 2.4 / SU0;   // free stream crosses the view in 2.4 s
+  if (SK.rows.length !== nRows || SK.key !== S.key) { SK.rows = Array.from({ length: nRows }, () => []); SK.key = S.key; }
+  const samp = (x, y) => { x -= 0.5; y -= 0.5; const i = Math.floor(x), j = Math.floor(y); if (i < 0 || j < 0 || i >= SNX - 1 || j >= SNY - 1) return null; const a = x - i, b = y - j, k = j * SNX + i;
+    if (sMask[k] && sMask[k + 1] && sMask[k + SNX] && sMask[k + SNX + 1]) return null;
+    const w00 = (1 - a) * (1 - b), w10 = a * (1 - b), w01 = (1 - a) * b, w11 = a * b; return [ux[k] * w00 + ux[k + 1] * w10 + ux[k + SNX] * w01 + ux[k + SNX + 1] * w11, uy[k] * w00 + uy[k + 1] * w10 + uy[k + SNX] * w01 + uy[k + SNX + 1] * w11]; };
+  SK.t += dt; const emit = SK.t > 0.04; if (emit) SK.t = 0;
+  for (let r = 0; r < nRows; r++) {
+    const row = SK.rows[r]; if (emit) row.push([cx0 - 3, y0 + (y1 - y0) * (r + 0.5) / nRows]);
+    for (let i = row.length - 1; i >= 0; i--) {
+      const p = row[i]; let dead = false;
+      for (let sub = 0; sub < 3 && !dead; sub++) { const u = samp(p[0], p[1]); if (!u) { dead = true; break; } p[0] += u[0] * speed * dt / 3; p[1] += u[1] * speed * dt / 3; }
+      if (dead || p[0] > cx0 + cw + 3 || p[1] < cy0 - 6 || p[1] > cy0 + ch + 6) row.splice(i, 1);
+    }
+    if (row.length > 260) row.splice(0, row.length - 260);
+  }
+}
 function drawSection() {
   if (!sField || !sMask) return;
   const W = secCv.clientWidth, H = secCv.clientHeight, dpr = dprS = Math.min(2, window.devicePixelRatio || 1);
   if (!W || !H) return;
   if (secCv.width !== Math.round(W * dpr) || secCv.height !== Math.round(H * dpr)) { secCv.width = Math.round(W * dpr); secCv.height = Math.round(H * dpr); }
-  const { ux, uy, dye, rho } = sField, d = sImg.data, q = 1.5 * SU0 * SU0;
+  const { ux, uy, rho } = sField, d = sImg.data, q = 1.5 * SU0 * SU0, now = performance.now(), fdt = Math.min(0.05, (now - (drawSection.t || now)) / 1000); drawSection.t = now;
+  if (drawSection.f !== sField || drawSection.v !== sView) { drawSection.f = sField; drawSection.v = sView;
   for (let y = 0; y < SNY; y++) for (let x = 0; x < SNX; x++) {
     let k = y * SNX + x; const o = ((SNY - 1 - y) * SNX + x) * 4;
     if (sMask[k]) { // fill the body with nearby fluid so the smooth outline has no dark halo
@@ -529,14 +552,19 @@ function drawSection() {
     let c;
     if (sView === 'p') { const cp = (rho[k] - 1) / q; c = cp < 0 ? ramp(CP_NEG, Math.sqrt(-cp / 2)) : ramp(CP_POS, Math.sqrt(cp)); }
     else c = SL.mapRGB('viridis', Math.hypot(ux[k], uy[k]) / SU0 / 1.8);
-    const dy = clamp(dye[k] * 1.5, 0, 1) * (sView === 'p' ? 0.32 : 0.6);
-    d[o] = c[0] + (245 - c[0]) * dy; d[o + 1] = c[1] + (248 - c[1]) * dy; d[o + 2] = c[2] + (252 - c[2]) * dy; d[o + 3] = 255;
+    d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
   }
-  sfx.putImageData(sImg, 0, 0);
+  sfx.putImageData(sImg, 0, 0); }
   // viewport in grid cells: about 2 chords wide around the section
   const cw = 1.75 * SL_, ch = cw * secCv.height / secCv.width, cx0 = sGeom(0).px - 0.25 * SL_ - 0.3 * SL_, cy0 = sGeom(0).py - ch * 0.5;
   const toS = ([x, y]) => [(x - cx0) / cw * secCv.width, (1 - (y - cy0) / ch) * secCv.height], sc = secCv.width / cw;
   sx.imageSmoothingEnabled = true; sx.imageSmoothingQuality = 'high'; sx.drawImage(sFieldC, cx0, SNY - cy0 - ch, cw, ch, 0, 0, secCv.width, secCv.height);
+  // smoke: streaklines released from fixed points upstream and carried by the simulated velocity field
+  streaks(fdt, ux, uy, cx0, cy0, cw, ch);
+  sx.lineWidth = 1.25 * dpr; sx.lineJoin = sx.lineCap = 'round'; sx.strokeStyle = sView === 'p' ? 'rgba(255,255,255,.78)' : 'rgba(255,255,255,.7)';
+  sx.beginPath();
+  for (const row of SK.rows) { let prev = null; for (const pt of row) { const [a, b] = toS(pt); if (prev && Math.hypot(pt[0] - prev[0], pt[1] - prev[1]) < 9) sx.lineTo(a, b); else sx.moveTo(a, b); prev = pt; } }
+  sx.stroke();
   const path = poly => { sx.beginPath(); poly.forEach((p, i) => { const [a, b] = toS(p); i ? sx.lineTo(a, b) : sx.moveTo(a, b); }); sx.closePath(); };
   // wing (and ice) as smooth vector shapes
   path(sPolys[0]); const gr = sx.createLinearGradient(0, toS([0, sGeom(0).py + 0.1 * SL_])[1], 0, toS([0, sGeom(0).py - 0.1 * SL_])[1]); gr.addColorStop(0, '#c9d3de'); gr.addColorStop(1, '#8e9aa8'); sx.fillStyle = gr; sx.fill(); sx.lineWidth = 1.2 * dpr; sx.strokeStyle = 'rgba(255,255,255,.85)'; sx.stroke();
@@ -584,8 +612,8 @@ function syncControls() {
   $('c-speed-o').textContent = `${kt(AP.vt)} kt`;
   $('c-alt').value = AP.ht; $('c-alt-o').textContent = `${int(AP.ht)} m`;
   $('c-aoa').value = S.aoa; $('c-aoa-o').textContent = S.mode === 'tunnel' ? `${fmt(S.aoa, 1)}°` : 'auto'; $('c-aoa').disabled = S.mode !== 'tunnel';
-  $('c-dt').value = S.dT; $('c-dt-o').textContent = `${fmt(OAT(S.mode === 'park' ? 0 : AP.ht), 0)} °C`;
-  for (const [id, k] of [['t-trails', 'trails'], ['t-smoke', 'smoke'], ['t-lift', 'liftmap']]) $(id).checked = S[k];
+  const hR = S.mode === 'park' ? 0 : AP.ht; $('c-dt').value = Math.round(OAT(hR)); $('c-dt-o').textContent = `${fmt(OAT(hR), 0)} °C`; wxStatus();
+  for (const [id, k] of [['t-trails', 'trails'], ['t-smoke', 'smoke'], ['t-lift', 'liftmap'], ['t-icehl', 'icehl']]) $(id).checked = S[k];
   $('c-takeoff').hidden = S.mode !== 'park';
   const sel = (id, v, attr = 'v') => document.querySelectorAll(`#${id} button`).forEach(b => b.setAttribute('aria-pressed', String(b.dataset[attr] === String(v))));
   sel('mode', S.mode); sel('c-time', S.ts); sel('wx', S.wx); sel('aircraft', S.key, 'k');
@@ -614,20 +642,49 @@ const on = (id, ev, fn) => $(id).addEventListener(ev, fn);
 on('aircraft', 'click', e => { const b = e.target.closest('.chip'); if (b) { stopExp(); setAircraft(b.dataset.k); } });
 on('views', 'click', e => { const b = e.target.closest('button'); if (b) setView(b.dataset.v); });
 on('mode', 'click', e => { const b = e.target.closest('button'); if (b) setMode(b.dataset.v); });
-on('wx', 'click', e => { const b = e.target.closest('button'); if (!b) return; S.wx = b.dataset.v; syncControls(); const T = OAT(S.mode === 'park' ? 0 : st.h), w = WX[S.wx];
-  if (w.lwc) toast(liquid(T) > 0 ? `${w.name} at ${fmt(T, 0)} °C: supercooled water will freeze on contact.` : T >= 0 ? `${w.name} at ${fmt(T, 0)} °C: above freezing, so no ice. Lower the temperature or climb.` : `${w.name} at ${fmt(T, 0)} °C: too cold for liquid water, little ice will form.`);
-  if ((S.wx === 'snow' || S.wx === 'frost') && S.mode === 'park' && T > -1) { S.dT = -4 - SL.isa(0).Tc; syncControls(); toast(`Snow and frost need sub-zero air, so the temperature is set to −4 °C.`); }
-  if (S.wx === 'frost' && S.mode !== 'park') toast('Frost forms on a parked aircraft on a clear, cold night. Switch the mode to Parked.');
-  if (S.wx === 'snow' && S.mode !== 'park') toast('Dry snow mostly blows off in flight. Park the aircraft to see it settle on the wings.'); });
+on('wx', 'click', e => { const b = e.target.closest('button'); if (b) chooseWx(b.dataset.v); });
+const setOAT = (T, hR = S.mode === 'park' ? 0 : AP.ht) => { S.dT = T - SL.isa(hR).Tc; };
+function chooseWx(w) {
+  S.wx = w; const hR = S.mode === 'park' ? 0 : AP.ht, T = OAT(hR), msgs = [];
+  if (w === 'cloud' && (T >= -2 || T < -20)) { setOAT(-8); msgs.push('temperature set to −8 °C, where cloud droplets stay liquid below freezing'); }
+  if (w === 'frz' && (T >= -1 || T < -10)) { setOAT(-3); msgs.push('temperature set to −3 °C: freezing rain needs a thin sub-zero layer'); }
+  if ((w === 'snow' || w === 'frost') && S.mode === 'park' && T > -1) { setOAT(-4, 0); msgs.push('temperature set to −4 °C'); }
+  if ((w === 'cloud' || w === 'frz' || ((w === 'snow' || w === 'frost') && S.mode === 'park')) && S.ts < 60) { S.ts = 60; msgs.push('time sped up 60× so you can watch it build'); }
+  if (w === 'clear') S.ts = 1;
+  if (msgs.length) toast(`${WX[w].name}: ${msgs.join('; ')}.`, 5500);
+  syncControls();
+}
+// plain-language summary of what the chosen weather is doing to the aircraft, with a one-click fix
+let wxFix = null;
+function wxStatus() {
+  if (!st) return;
+  const el = $('wx-status'), Tc = OAT(hNow()), r = iceRate() * 60e3, w = S.wx; let txt, cls = '', fix = null;
+  const T = `${fmt(Tc, 0)} °C`;
+  if (w === 'clear') txt = 'Clear air: nothing to freeze. Pick <b>Icing cloud</b> or <b>Freezing rain</b> to grow ice, or <b>Snow</b> while parked.';
+  else if (w === 'cloud' || w === 'frz') {
+    if (S.mode === 'park') { txt = 'Icing needs airflow. Switch to <b>Fly</b> or <b>Wind tunnel</b>.'; fix = ['Fly', () => setMode('fly')]; cls = 'warn'; }
+    else if (Tc >= 0) { txt = `${T} is above freezing: the water stays liquid, so no ice.`; fix = [w === 'frz' ? 'Set −3 °C' : 'Set −8 °C', () => setOAT(w === 'frz' ? -3 : -8)]; cls = 'warn'; }
+    else if (r <= 0) { txt = w === 'frz' ? `${T} is too cold for freezing rain: it would fall as snow.` : `${T}: the cloud has frozen to ice crystals, which bounce off.`; fix = [w === 'frz' ? 'Set −3 °C' : 'Set −8 °C', () => setOAT(w === 'frz' ? -3 : -8)]; cls = 'warn'; }
+    else { const kd = st.kind === 'glaze' ? 'clear glaze' : st.kind === 'mixed' ? 'mixed rime and glaze' : 'white rime'; txt = `<b>Ice forming</b> · ${kd} · ${fmt(r, 1)} mm per minute of flight${S.ts > 1 ? ` (≈${fmt(r * S.ts / 60, 1)} mm/s at ${S.ts}×)` : ''} · <b>${Math.round(st.k * 1000)} mm</b> so far`; cls = 'good';
+      if (S.ts < 60) fix = ['Speed up 60×', () => { S.ts = 60; }]; else if (st.k > 0.004 && !['close', 'front'].includes(S.view)) fix = ['Look closer', () => setView('front')]; else if (st.k > 0.004 && !S.icehl) fix = ['Highlight ice', () => { S.icehl = true; }]; }
+  } else {
+    if (S.mode !== 'park') { txt = w === 'snow' ? 'Dry snow blows straight off a flying aircraft. Park it to see snow settle.' : 'Frost forms on a parked aircraft on a cold, clear night.'; fix = ['Park', () => { setMode('park'); if (OAT(0) > -1) setOAT(-4, 0); S.ts = 60; }]; cls = 'warn'; }
+    else if (Tc > 1) { txt = `${T} is too warm: ${w} melts.`; fix = ['Set −4 °C', () => setOAT(-4, 0)]; cls = 'warn'; }
+    else { txt = st.contam > 0.15 ? `<b>Wing ${w === 'frost' ? 'frosted' : 'covered'}</b>: about ${Math.round(30 * st.contam)}% less lift. Try <b>Take off</b>, or <b>De-ice</b> first.` : `<b>${w === 'frost' ? 'Frost' : 'Snow'} settling</b> on the upper surfaces…`; cls = 'good'; if (S.ts < 60) fix = ['Speed up 60×', () => { S.ts = 60; }]; }
+  }
+  const key = txt + (fix ? fix[0] : '');
+  if (el._k !== key) { el._k = key; el.className = 'wxs ' + cls; el.innerHTML = `<span>${txt}</span>` + (fix ? `<button type="button" class="btn sm">${fix[0]}</button>` : ''); wxFix = fix; const bt = el.querySelector('button'); if (bt) bt.onclick = () => { wxFix[1](); syncControls(); }; }
+}
 on('c-time', 'click', e => { const b = e.target.closest('button'); if (b) { S.ts = +b.dataset.v; syncControls(); } });
 on('c-speed', 'input', e => { AP.vt = +e.target.value; if (S.mode === 'tunnel') st.V = AP.vt; $('c-speed-o').textContent = `${kt(AP.vt)} kt`; });
 on('c-alt', 'input', e => { AP.ht = +e.target.value; if (S.mode === 'tunnel') st.h = AP.ht; $('c-alt-o').textContent = `${int(AP.ht)} m`; syncControls(); });
 on('c-aoa', 'input', e => { S.aoa = +e.target.value; $('c-aoa-o').textContent = `${fmt(S.aoa, 1)}°`; });
-on('c-dt', 'input', e => { S.dT = +e.target.value; $('c-dt-o').textContent = `${fmt(OAT(S.mode === 'park' ? 0 : AP.ht), 0)} °C`; });
+on('c-dt', 'input', e => { const hR = S.mode === 'park' ? 0 : AP.ht; S.dT = +e.target.value - SL.isa(hR).Tc; $('c-dt-o').textContent = `${fmt(OAT(hR), 0)} °C`; wxStatus(); });
 on('c-deice', 'click', () => { const b = Math.round(st.k * 1000), s = st.contam; if (b < 1 && s < 0.05) { toast('Nothing to remove.'); return; } clearSurface(S.mode === 'park' ? 0 : 0.12); toast(S.mode === 'park' ? 'De-iced on the ground: the wings are clean.' : `De-iced: leading-edge ice ${b} → ${Math.round(st.k * 1000)} mm.`); });
 on('c-takeoff', 'click', takeOff);
 on('t-trails', 'change', e => { S.trails = e.target.checked; buildTrails(); });
 on('t-smoke', 'change', e => { S.smoke = e.target.checked; });
+on('t-icehl', 'change', e => { S.icehl = e.target.checked; });
 on('t-lift', 'change', e => { S.liftmap = e.target.checked; liftMap(!S.liftmap); });
 
 // ====================================================== gauges and info
@@ -650,7 +707,7 @@ function gauges() {
   else if (S.mode === 'park') txt = st.contam > 0.15 ? `Parked · wing ${st.cType === 'frost' ? 'frosted' : 'snow-covered'}` : 'Parked';
   else if (S.mode === 'tunnel') txt = lw >= 1 ? 'Wind tunnel · enough lift to fly' : 'Wind tunnel · not enough lift';
   else if (Math.abs(O.vs) > 1.5) txt = O.vs > 0 ? 'Climbing' : 'Descending';
-  else txt = WX[S.wx].lwc && liquid(OAT(hNow())) > 0 ? 'Cruising · ice accreting' : 'Cruising';
+  else txt = iceRate() > 0 ? 'Cruising · ice accreting' : 'Cruising';
   el.textContent = txt; el.className = 'state ' + cls;
   ban.hidden = !cls; ban.className = cls; ban.textContent = O.stalled ? 'Stall' : 'Stall warning';
   cam.shake = O.stalled ? 0.008 * L_ref : 0;
@@ -661,7 +718,7 @@ function infoCard() { const m = CAT[S.key]; $('ac-name').textContent = m.name; $
 let EXP = null, step = 0;
 const tween = (get, set, to, dur) => tweens.push({ from: get(), to, set, t: 0, dur });
 const tw = { aoaT: (to, d) => tween(() => S.aoa, v => S.aoa = v, to, d) };
-const setWx = w => { S.wx = w; syncControls(); };
+const setWx = w => { S.wx = w; syncControls(); };   // experiments set exact conditions themselves
 const EXPERIMENTS = [
   { title: 'How a wing makes lift', blurb: 'Smoke over the wing, lift on the map.', steps: [
     { t: 'Air splits around the wing', b: 'The smoke streams turn <b>amber</b> where the air speeds up over the wing and <b>blue</b> where it slows underneath. Faster air has lower pressure, so the wing is pushed up.', go() { setWx('clear'); setMode('tunnel'); S.aoa = 3; S.smoke = true; S.liftmap = true; setView('side'); syncControls(); } },
@@ -723,7 +780,7 @@ function loop(now) {
   outputs();
   if (S.mode !== 'park' && (Math.abs(st.alpha - fieldAlpha) > 0.5 * D2R || fieldVer !== SL.version)) requestField(st.alpha);
   stepSmoke(dt); stepPrecip(dt);
-  if (now - slowT > 200) { const d = (now - slowT) / 1000 * (S.mode === 'fly' || S.mode === 'tunnel' || S.mode === 'park' ? S.ts : 1); slowT = now; surfaceUpdate(Math.min(d, 20)); sectionUpdate(false); }
+  if (now - slowT > 200) { const d = (now - slowT) / 1000 * (S.mode === 'fly' || S.mode === 'tunnel' || S.mode === 'park' ? S.ts : 1); slowT = now; surfaceUpdate(Math.min(d, 20)); sectionUpdate(false); wxStatus(); }
   if (trails) trails.visible = S.trails && S.mode !== 'park';
   updateWorld(dt); resize(); updateCamera(dt);
   R.render(scene, camera);
@@ -735,9 +792,10 @@ function loop(now) {
       if (T === 'Snow and frost before take-off' && step === 0 && st.contam > 0.6) goStep(1); if (T === 'Snow and frost before take-off' && step === 1 && S.mode === 'fly') goStep(2); }
   }
 }
+document.addEventListener('visibilitychange', () => sw.postMessage({ type: 'run', running: !document.hidden }));   // no simulation in a hidden tab
 window.SLIP = { S, AP, get st() { return st; }, get corner() { return corner; }, setMode, setAircraft, setView };   // console/debug access
 (async () => {
-  CAT = await (await fetch('models/catalog.json?v=9')).json();
+  CAT = await (await fetch('models/catalog.json?v=' + VER)).json();
   for (const [k, m] of Object.entries(CAT)) SL.PROJECTS[k] = { name: m.short, wing: m.wing, tail: m.tail, body: m.body, mass: m.mass, cg: m.cg, engine: m.engine, flight: m.flight };
   refreshEnv(); renderExp(); setView('chase');
   await setAircraft('c172');
